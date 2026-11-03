@@ -20,6 +20,10 @@ Engine milestone M11: packaging and protocol (in progress).
 - **Conformance suite** (`conformance/`, `engram conformance --url URL --token T` or `engram conformance -- COMMAND`): 27 checks of the spec's lifecycle, JSON-RPC, memory, provenance, bitemporal, scope and optional-capability requirements, over HTTP or stdio, against any ECP server. Engram passes all applicable checks on both transports, and CI runs the suite.
 - **SDKs**: Go (`sdk/go/ecpclient`), TypeScript (`sdk/typescript`, Node 20+) and Python (`sdk/python`, 3.9+), with no runtime dependencies, over HTTP or stdio, including notifications. `sdk/test.sh` runs the TypeScript and Python suites against a live server.
 - Ending an HTTP session (`DELETE /ecp`) closes its event stream.
+- **`engram init`**: one-command setup. It opens the database, checks the embedding and chat models, connects Claude Code (`claude mcp add --scope user`), Claude Desktop, Codex and Cursor by editing their MCP config (idempotent, with backups), pairs them, sets sleep hours, installs a scheduler (cron, or launchd on macOS), installs the Developer pack, imports the current git repository, and optionally adds the permission-assist hooks. `--yes` accepts every recommended step.
+- `~/.engram/config`: `ENGRAM_*` settings saved by `init --embed-url/--embed-model/--llm-url/--llm-model`. Environment variables still win.
+- **Releases**: a tag `v*` builds native binaries for Linux (amd64, arm64), macOS (arm64, amd64) and Windows (amd64) with checksums, and pushes a container image to GHCR. `install.sh` downloads and verifies the right binary. A Homebrew formula lives in `packaging/homebrew/`.
+- **Docker**: a multi-stage `Dockerfile` (non-root, `/data` volume) and `docker-compose.yml` with the engine, trigger listener, dashboard and sleep loop sharing one volume, published on 127.0.0.1 only, plus an optional Ollama profile. `engram dashboard --container` binds every interface but still answers only requests addressed to localhost.
 
 ### Fixed
 

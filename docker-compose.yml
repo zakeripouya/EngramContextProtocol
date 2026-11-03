@@ -1,0 +1,57 @@
+# Engram self-hosted: one database volume shared by every service.
+#
+#   docker compose up -d
+#   docker compose run --rm engram pair my-agent --read me --write me
+#   docker compose run --rm engram token create my-agent
+#   docker compose logs dashboard     # the dashboard link with its token
+#
+# Ports are published on 127.0.0.1 only. Put a reverse proxy with TLS in front to
+# reach the engine or the trigger listener from other machines; every request
+# still needs a token. Optional local models:
+#   docker compose --profile models up -d
+#   docker compose exec ollama ollama pull nomic-embed-text
+#   docker compose exec ollama ollama pull llama3.2
+#   docker compose run --rm engram reembed
+
+x-engram: &engram
+  image: engram:latest
+  build: .
+  volumes:
+    - engram-data:/data
+  environment:
+    ENGRAM_DB: /data/engram.db
+    ENGRAM_EMBED_URL: ${ENGRAM_EMBED_URL:-http://ollama:11434}
+    ENGRAM_EMBED_MODEL: ${ENGRAM_EMBED_MODEL:-nomic-embed-text}
+    ENGRAM_LLM_URL: ${ENGRAM_LLM_URL:-http://ollama:11434}
+    ENGRAM_LLM_MODEL: ${ENGRAM_LLM_MODEL:-llama3.2}
+  restart: unless-stopped
+
+services:
+  engram:
+    <<: *engram
+    command: ["serve", "--http", "0.0.0.0:7079"]
+    ports: ["127.0.0.1:7079:7079"]
+
+  listener:
+    <<: *engram
+    command: ["listen", "--addr", "0.0.0.0:7077"]
+    ports: ["127.0.0.1:7077:7077"]
+
+  dashboard:
+    <<: *engram
+    command: ["dashboard", "--addr", "0.0.0.0:7078", "--container"]
+    ports: ["127.0.0.1:7078:7078"]
+
+  sleep:
+    <<: *engram
+    entrypoint: ["sh", "-c", "while true; do engram sleep run --if-due; sleep 900; done"]
+
+  ollama:
+    image: ollama/ollama:latest   # pin a version you have tested
+    profiles: ["models"]
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  engram-data:
+  ollama-models:

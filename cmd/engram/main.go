@@ -49,7 +49,8 @@ import (
 const usage = `engram: shared memory for AI agents (ECP %s reference server, v%s)
 
 Usage:
-  engram serve [--client NAME]            run the MCP server over stdio
+  engram init [--yes]                     set up Engram: models, agents, sleep hours, scheduler, starting knowledge
+  engram serve [--client NAME]            serve over stdio (MCP, or native ECP when the client speaks it)
   engram pair NAME --read NS --write NS   approve a client; namespaces are comma-separated
   engram clients                          list paired clients and their grants
   engram revoke NAME                      remove all of a client's grants
@@ -158,8 +159,11 @@ func run(args []string) error {
 		fmt.Printf(usage, ecp.ProtocolVersion, server.Version)
 		return nil
 	}
+	loadConfig()
 	cmd, rest := args[0], args[1:]
 	switch cmd {
+	case "init":
+		return runInit(rest)
 	case "version", "--version":
 		fmt.Printf("engram %s (ECP %s)\n", server.Version, ecp.ProtocolVersion)
 		return nil
@@ -397,6 +401,7 @@ func run(args []string) error {
 	case "dashboard":
 		fs := flag.NewFlagSet("dashboard", flag.ContinueOnError)
 		addr := fs.String("addr", "127.0.0.1:7078", "loopback address to serve on")
+		container := fs.Bool("container", false, "inside a container: bind any interface (still answers only requests addressed to localhost, so publish the port on 127.0.0.1)")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
@@ -404,15 +409,20 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		if host != "127.0.0.1" && host != "localhost" && host != "::1" {
-			return fmt.Errorf("the dashboard only serves on loopback (127.0.0.1, localhost or ::1)")
+		if !*container && host != "127.0.0.1" && host != "localhost" && host != "::1" {
+			return fmt.Errorf("the dashboard only serves on loopback (127.0.0.1, localhost or ::1); in a container use --container")
 		}
 		ln, err := net.Listen("tcp", *addr)
 		if err != nil {
 			return err
 		}
 		token := dashboard.NewToken()
-		fmt.Printf("Engram dashboard: http://%s/#token=%s\n", ln.Addr(), token)
+		shown := ln.Addr().String()
+		if *container {
+			_, port, _ := net.SplitHostPort(shown)
+			shown = "localhost:" + port // the published port on the host
+		}
+		fmt.Printf("Engram dashboard: http://%s/#token=%s\n", shown, token)
 		fmt.Println("The link carries a one-time token; keep it private. Press Ctrl+C to stop.")
 		hs := &http.Server{Handler: dashboard.Handler(st, token), ReadHeaderTimeout: 10 * time.Second}
 		return hs.Serve(ln)

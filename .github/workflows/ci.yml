@@ -62,3 +62,13 @@ jobs:
           export ENGRAM_DB="$RUNNER_TEMP/engram.db" ENGRAM_EMBED=hash ENGRAM_LLM=off
           ./engram pair conformance --read conformance/test --write conformance/test
           ./engram conformance -- ./engram serve --client conformance
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image and start it
+        run: |
+          docker build --build-arg VERSION=ci -t engram:ci .
+          docker run --rm engram:ci version
+          docker compose config >/dev/null
