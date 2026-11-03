@@ -24,9 +24,11 @@ var builtinPacks embed.FS
 type Pack struct {
 	Name        string       `json:"name"`
 	Version     string       `json:"version"`
+	Kind        string       `json:"kind,omitempty"` // template (default), source or instance
 	Description string       `json:"description"`
 	Memories    []PackMemory `json:"memories"`
 	Edges       []PackEdge   `json:"edges"`
+	Signature   *Signature   `json:"signature,omitempty"`
 }
 
 // PackMemory is one memory in a pack, referenced by its key within the pack.
@@ -89,25 +91,65 @@ func LoadPack(nameOrPath string) (Pack, error) {
 // PackResult reports a pack installation.
 type PackResult struct {
 	Namespace string `json:"namespace"`
-	Memories  int    `json:"memories"`
-	Edges     int    `json:"edges"`
+	Memories  int    `json:"memories"` // added
+	Updated   int    `json:"updated"`  // changed in place by an update
+	Archived  int    `json:"archived"` // dropped by an update
+	Edges     int    `json:"edges"`    // pathways added
 }
 
 var packKinds = map[string]bool{"concept": true, "fact": true, "procedure": true}
 
-// InstallPack writes a pack into pack/<name>. Reinstalling the same pack is a no-op
-// for memories it already holds.
+// InstallOptions say where a pack came from.
+type InstallOptions struct {
+	Source    string // builtin, a file path, or registry:<name>
+	Publisher string // signing key id
+	Verified  bool   // signed by a trusted key (or built in)
+}
+
+// InstallPack installs a built-in or already-verified pack.
 func InstallPack(st *store.Store, p Pack) (PackResult, error) {
+	return Install(st, p, InstallOptions{Source: "builtin", Verified: true})
+}
+
+// Install writes a pack into pack/<name>, or updates an installed one: new
+// memories are added, changed ones updated in place (keeping their ids and
+// learned pathways), and ones the new version dropped are archived. Pathways are
+// added at their prior weight (capped at 0.4) only when absent, so updating a
+// pack never resets what use has taught.
+func Install(st *store.Store, p Pack, o InstallOptions) (PackResult, error) {
 	ns := "pack/" + p.Name
 	res := PackResult{Namespace: ns}
+	if p.Kind == "" {
+		p.Kind = "template"
+	}
+	if p.Kind != "template" && p.Kind != "source" && p.Kind != "instance" {
+		return res, fmt.Errorf("pack kind must be template, source or instance")
+	}
+	prefix := "pack:" + p.Name + ":"
+	before, err := st.SystemKeys(prefix)
+	if err != nil {
+		return res, err
+	}
 	ids := map[string]string{}
 	for _, m := range p.Memories {
 		if !packKinds[m.Kind] {
 			return res, fmt.Errorf("pack memory %q: kind must be concept, fact or procedure", m.Key)
 		}
+		tags := append([]string{"pack", p.Name}, m.Tags...)
+		if id, ok := before[prefix+m.Key]; ok {
+			changed, err := st.UpdateSystemMemory(id, m.Content, tags)
+			if err != nil {
+				return res, fmt.Errorf("pack memory %q: %w", m.Key, err)
+			}
+			if changed {
+				res.Updated++
+			}
+			ids[m.Key] = id
+			continue
+		}
 		id, created, err := st.InsertSystem(store.SystemMemory{
-			Key: "pack:" + p.Name + ":" + m.Key, Kind: m.Kind, Namespace: ns, Service: "pack",
-			Content: m.Content, Tags: append([]string{"pack", p.Name}, m.Tags...), Strength: ImportStrength,
+			Key: prefix + m.Key, Kind: m.Kind, Namespace: ns, Service: "pack",
+			Content: m.Content, Tags: tags, Strength: ImportStrength,
 		})
 		if err != nil {
 			return res, fmt.Errorf("pack memory %q: %w", m.Key, err)
@@ -115,6 +157,13 @@ func InstallPack(st *store.Store, p Pack) (PackResult, error) {
 		ids[m.Key] = id
 		if created {
 			res.Memories++
+		}
+	}
+	for key, id := range before {
+		if _, kept := ids[strings.TrimPrefix(key, prefix)]; !kept {
+			if err := st.Archive(id, ""); err == nil {
+				res.Archived++
+			}
 		}
 	}
 	for _, e := range p.Edges {
@@ -127,11 +176,17 @@ func InstallPack(st *store.Store, p Pack) (PackResult, error) {
 		if kind == "" {
 			kind = "coactive"
 		}
-		// Pack edges are priors: capped low so real use can outweigh them.
-		if err := st.AddEdge(a, b, kind, min(e.Weight, 0.4)); err != nil {
+		added, err := st.AddPackEdge(p.Name, a, b, kind, min(e.Weight, 0.4))
+		if err != nil {
 			return res, err
 		}
-		res.Edges++
+		if added {
+			res.Edges++
+		}
 	}
-	return res, nil
+	if o.Source == "" {
+		o.Source = "file"
+	}
+	return res, st.RecordPack(store.PackInfo{Name: p.Name, Version: p.Version, Kind: p.Kind, Source: o.Source,
+		Publisher: o.Publisher, Verified: o.Verified, Description: p.Description})
 }

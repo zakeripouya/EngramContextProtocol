@@ -287,6 +287,32 @@ var migrations = []string{
 	  last_used_at TEXT,
 	  revoked_at   TEXT
 	);`,
+	// 13 (M11): installed packs and the priors they installed.
+	`CREATE TABLE IF NOT EXISTS packs (
+	  name         TEXT PRIMARY KEY,
+	  version      TEXT NOT NULL,
+	  kind         TEXT NOT NULL DEFAULT 'template',
+	  source       TEXT NOT NULL,
+	  publisher    TEXT NOT NULL DEFAULT '',
+	  verified     INTEGER NOT NULL DEFAULT 0,
+	  description  TEXT NOT NULL DEFAULT '',
+	  installed_at TEXT NOT NULL,
+	  updated_at   TEXT NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS pack_edges (
+	  pack  TEXT NOT NULL,
+	  src   TEXT NOT NULL,
+	  dst   TEXT NOT NULL,
+	  kind  TEXT NOT NULL,
+	  prior REAL NOT NULL,
+	  PRIMARY KEY (src, dst, kind)
+	);
+	CREATE INDEX IF NOT EXISTS pack_edges_pack ON pack_edges(pack);
+	INSERT OR IGNORE INTO packs(name, version, kind, source, installed_at, updated_at)
+	  SELECT substr(namespace, 6), '0.0.0', 'template',
+	    CASE WHEN substr(namespace, 6) = 'developer' THEN 'builtin' ELSE 'unknown (installed before 0.11)' END,
+	    min(created_at), min(created_at)
+	  FROM memories WHERE namespace LIKE 'pack/%' GROUP BY namespace;`,
 }
 
 // Accepted values (spec, "Data types").

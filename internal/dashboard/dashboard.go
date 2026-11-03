@@ -19,12 +19,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/zakeripouya/EngramContextProtocol/internal/bootstrap"
 	"github.com/zakeripouya/EngramContextProtocol/internal/health"
 	"github.com/zakeripouya/EngramContextProtocol/internal/permit"
 	"github.com/zakeripouya/EngramContextProtocol/internal/sleep"
@@ -63,6 +66,10 @@ func Handler(st *store.Store, token string) http.Handler {
 	api.HandleFunc("GET /api/clients", a.clients)
 	api.HandleFunc("POST /api/clients/{name}/revoke", a.revoke)
 	api.HandleFunc("GET /api/permits", a.permits)
+	api.HandleFunc("GET /api/packs", a.packs)
+	api.HandleFunc("POST /api/packs/{name}/remove", a.removePack)
+	api.HandleFunc("POST /api/packs/{name}/install", a.installBuiltin)
+	api.HandleFunc("GET /api/export", a.export)
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", guard(token, api))
@@ -345,4 +352,79 @@ func (a *app) revoke(w http.ResponseWriter, r *http.Request) {
 func (a *app) permits(w http.ResponseWriter, r *http.Request) {
 	rep, err := permit.BuildReport(a.st, 5000)
 	a.send(w, rep, err)
+}
+
+// PackView is an installed or available pack with its reweighting statistics.
+type PackView struct {
+	store.PackInfo
+	Installed bool             `json:"installed"`
+	Stats     *store.PackStats `json:"stats,omitempty"`
+}
+
+func (a *app) packs(w http.ResponseWriter, r *http.Request) {
+	installed, err := a.st.Packs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := []PackView{}
+	have := map[string]bool{}
+	for _, p := range installed {
+		have[p.Name] = true
+		stats, _ := a.st.PackStatsFor(p.Name)
+		out = append(out, PackView{PackInfo: p, Installed: true, Stats: &stats})
+	}
+	for _, name := range bootstrap.BuiltinPacks() {
+		if have[name] {
+			continue
+		}
+		if p, err := bootstrap.LoadPack(name); err == nil {
+			out = append(out, PackView{PackInfo: store.PackInfo{Name: p.Name, Version: p.Version, Kind: "template",
+				Source: "builtin", Verified: true, Description: p.Description}})
+		}
+	}
+	writeJSON(w, map[string]any{"packs": out})
+}
+
+func (a *app) removePack(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if _, ok, _ := a.st.InstalledPack(name); !ok {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("no installed pack %q", name))
+		return
+	}
+	n, err := a.st.RemoveNamespace("pack/" + name)
+	if err == nil {
+		err = a.st.ForgetPack(name)
+	}
+	a.send(w, map[string]int{"removed": n}, err)
+}
+
+// installBuiltin installs a pack shipped in the binary. Registry and file packs
+// are installed from the terminal, where signature and trust decisions are made.
+func (a *app) installBuiltin(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !slices.Contains(bootstrap.BuiltinPacks(), name) {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("only built-in packs install from the dashboard; use engram pack install for others"))
+		return
+	}
+	p, err := bootstrap.LoadPack(name)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	res, err := bootstrap.InstallPack(a.st, p)
+	a.send(w, res, err)
+}
+
+func (a *app) export(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	p, err := bootstrap.Export(a.st, q.Get("ns"), bootstrap.ExportOptions{Name: q.Get("name"), Version: q.Get("version")})
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.json"`, p.Name, p.Version))
+	b, _ := json.MarshalIndent(p, "", "  ")
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(append(b, '\n'))
 }

@@ -24,10 +24,16 @@ Engine milestone M11: packaging and protocol (in progress).
 - `~/.engram/config`: `ENGRAM_*` settings saved by `init --embed-url/--embed-model/--llm-url/--llm-model`. Environment variables still win.
 - **Releases**: a tag `v*` builds native binaries for Linux (amd64, arm64), macOS (arm64, amd64) and Windows (amd64) with checksums, and pushes a container image to GHCR. `install.sh` downloads and verifies the right binary. A Homebrew formula lives in `packaging/homebrew/`.
 - **Docker**: a multi-stage `Dockerfile` (non-root, `/data` volume) and `docker-compose.yml` with the engine, trigger listener, dashboard and sleep loop sharing one volume, published on 127.0.0.1 only, plus an optional Ollama profile. `engram dashboard --container` binds every interface but still answers only requests addressed to localhost.
+- **Pack registry**: signed packs (Ed25519; `engram pack keygen | sign | trust | untrust | keys`). Registries can be a local directory, a public https URL or a private URL with a token from an environment variable (`engram pack registry add | list | remove`), each a static `index.json` plus pack files with SHA-256 checksums. Also `engram pack search`, `install NAME[@VERSION]`, `update`, and `publish FILE --to DIR`. Registry packs must be signed by a trusted key; local files must be signed or explicitly allowed.
+- Pack updates add new memories, change edited ones in place and archive dropped ones, and never reset learned pathway weights. Install-time priors are recorded, so `engram pack list` and the dashboard show how use has reweighted each pack.
+- `engram pack export NAMESPACE --name NAME [--sign]`: an instance pack of a namespace's current facts, concepts and procedures and their learned pathways. Episodes, decisions, suggestions and secret-looking content are never exported.
+- Dashboard **Packs** view: installed packs with verification and reweighting, built-in installs, removal, and export as a download.
 
 ### Fixed
 
 - The static report failed to render nights with distilled facts (it read a field that doesn't exist).
+- Removing a pack left its import keys behind, so reinstalling it installed nothing.
+- Reinstalling a pack reset its learned pathway weights to the pack's priors.
 
 ## [0.10.0] - 2026-11-03
 

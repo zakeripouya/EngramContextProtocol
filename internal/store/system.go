@@ -98,6 +98,13 @@ func (s *Store) RemoveNamespace(namespace string) (int, error) {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
+	// Keys of removed memories must go too, or reinstalling would find them and skip.
+	if _, err := s.db.Exec(`DELETE FROM import_keys WHERE memory_id NOT IN (SELECT id FROM memories)`); err != nil {
+		return int(n), err
+	}
+	if _, err := s.db.Exec(`DELETE FROM edges WHERE src NOT IN (SELECT id FROM memories) OR dst NOT IN (SELECT id FROM memories)`); err != nil {
+		return int(n), err
+	}
 	_ = audit(s.db, "engram-cli", "remove-namespace", namespace, "")
 	return int(n), nil
 }

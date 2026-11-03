@@ -135,6 +135,7 @@ const views = {
   triggers: { label: "Triggers", render: renderTriggers },
   sessions: { label: "Sessions", render: renderSessions },
   agents: { label: "Agents", render: renderAgents },
+  packs: { label: "Packs", render: renderPacks },
   permissions: { label: "Permissions", render: renderPermissions },
 };
 const main = document.getElementById("view");
@@ -449,6 +450,67 @@ async function renderAgents() {
       if (!confirmInline(e.target, "Revoke?")) return;
       await api(`clients/${encodeURIComponent(c.client)}/revoke`, {}); toast(`${c.client} revoked.`); renderAgents();
     } }, "Revoke")])));
+}
+
+async function renderPacks() {
+  const [{ packs }, o] = await Promise.all([api("packs"), api("overview")]);
+  main.replaceChildren();
+  put(main, h("h1", {}, "Packs"),
+    h("p", { class: "lede" }, "Pre-wired memory that gives Engram a head start, then adapts to you. Pack pathways install at low weight; the bars show how your use has reweighted them."));
+  const installed = packs.filter((p) => p.installed), available = packs.filter((p) => !p.installed);
+  if (installed.length) {
+    main.append(table(["Pack", "Version", "Source", "Memories", "Pathways", "How use changed them", ""], installed.map((p) => {
+      const s = p.stats || {};
+      const total = Math.max(1, s.edges);
+      return [
+        h("div", {}, h("strong", {}, p.name), " ", pill(p.kind, ""), h("div", { class: "meta muted" }, p.description || "")),
+        p.version,
+        h("div", {}, p.source, " ", pill(p.verified ? "verified" : "unverified", p.verified ? "ok" : "warn")),
+        `${s.memories} (${s.recalled} recalled)`,
+        s.edges,
+        s.edges ? h("div", {},
+          h("div", { class: "bar", title: `${s.strengthened} strengthened, ${s.weakened} weakened` },
+            h("span", { style: `width:${Math.round((100 * s.strengthened) / total)}%` })),
+          h("div", { class: "meta muted" }, `${s.strengthened} strengthened, ${s.weakened} weakened, mean change ${s.meanDelta >= 0 ? "+" : ""}${s.meanDelta.toFixed(2)}`)) : "-",
+        h("button", { class: "btn danger", onclick: async (e) => {
+          if (!confirmInline(e.target, "Remove?")) return;
+          await api(`packs/${encodeURIComponent(p.name)}/remove`, {}); toast(`${p.name} removed.`); renderPacks();
+        } }, "Remove")];
+    }), [3, 4]));
+  } else {
+    main.append(h("div", { class: "empty" }, "No packs installed."));
+  }
+  if (available.length) {
+    main.append(h("h2", {}, "Built in"), table(["Pack", "Version", "About", ""], available.map((p) => [
+      h("strong", {}, p.name), p.version, p.description,
+      h("button", { class: "btn primary", onclick: async (e) => {
+        e.target.disabled = true;
+        try { await api(`packs/${encodeURIComponent(p.name)}/install`, {}); toast(`${p.name} installed.`); renderPacks(); }
+        catch (err) { toast(err.message); e.target.disabled = false; }
+      } }, "Install")])));
+  }
+  main.append(h("p", { class: "meta muted" }, "Packs from registries or files are installed in the terminal (engram pack install), where their signatures and publishers are checked."));
+
+  const ns = h("select", { "aria-label": "Namespace to export" }, o.namespaces.filter((n) => !n.namespace.startsWith("pack/"))
+    .map((n) => h("option", { value: n.namespace }, `${n.namespace} (${n.memories})`)));
+  const name = h("input", { type: "search", placeholder: "pack name, like team-knowledge", "aria-label": "Pack name", style: "min-width:200px" });
+  const out = h("div", { class: "meta" });
+  main.append(h("h2", {}, "Export"),
+    h("div", { class: "card" },
+      h("div", {}, "Turn a namespace's learned subgraph into an instance pack: its current facts, concepts and procedures and the pathways between them. Episodes, decisions and suggestions stay private."),
+      h("div", { class: "row", style: "margin-top:10px" }, ns, name,
+        h("button", { class: "btn", onclick: async () => {
+          out.textContent = "";
+          try {
+            const res = await fetch("/api/export?" + new URLSearchParams({ ns: ns.value, name: name.value.trim() }), { headers: { "X-Engram-Token": token } });
+            if (!res.ok) throw new Error((await res.json()).error);
+            const blob = await res.blob();
+            const a = h("a", { href: URL.createObjectURL(blob), download: `${name.value.trim()}-0.1.0.json` });
+            document.body.append(a); a.click(); a.remove();
+            out.textContent = "Downloaded. Review it, then sign it with engram pack sign FILE before sharing.";
+          } catch (err) { out.textContent = err.message; }
+        } }, "Download")),
+      out));
 }
 
 // Two-step confirm without a browser dialog.

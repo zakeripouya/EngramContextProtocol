@@ -61,9 +61,11 @@ Usage:
                                           import a repository's history, file coupling and conventions
   engram import jira FILE [--ns NS]       import a saved Jira search export (JSON)
   engram import json FILE [--ns NS]       import generic records [{"kind","content","tags","validFrom"}]
-  engram pack list                        list built-in pathway packs
-  engram pack install NAME|FILE           install a pack into pack/<name>
-  engram pack remove NAME                 uninstall a pack
+  engram pack list | search [TERM]        installed, built-in and registry packs
+  engram pack install NAME[@V]|FILE       install a built-in, registry or local pack (signatures checked)
+  engram pack update [NAME] | remove NAME update from registries (learned weights kept), or uninstall
+  engram pack export NS --name N [--sign] export a namespace as an instance pack (secrets and private kinds excluded)
+  engram pack keygen | sign | trust | keys | registry | publish   see engram pack help
   engram sleep hours 01:00-07:00 [--tz Zone]
                                           set your sleep hours (the cycle only runs inside them)
   engram sleep run [--light] [--if-due]   run a consolidation cycle now, or only if it is due
@@ -597,49 +599,6 @@ func runImport(st *store.Store, args []string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown import source %q; use git, jira or json", kind)
-}
-
-func runPack(st *store.Store, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: engram pack list | install NAME|FILE | remove NAME")
-	}
-	switch args[0] {
-	case "list":
-		for _, name := range bootstrap.BuiltinPacks() {
-			p, err := bootstrap.LoadPack(name)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("%-14s %-8s %s\n", p.Name, p.Version, p.Description)
-		}
-		return nil
-	case "install":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: engram pack install NAME|FILE")
-		}
-		p, err := bootstrap.LoadPack(args[1])
-		if err != nil {
-			return err
-		}
-		res, err := bootstrap.InstallPack(st, p)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Installed %s %s into %s: %d memories, %d pathways\n", p.Name, p.Version, res.Namespace, res.Memories, res.Edges)
-		fmt.Printf("Let an agent read it with: engram pair <client> --read %s\n", res.Namespace)
-		return nil
-	case "remove":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: engram pack remove NAME")
-		}
-		n, err := st.RemoveNamespace("pack/" + args[1])
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Removed %d memories from pack/%s\n", n, args[1])
-		return nil
-	}
-	return fmt.Errorf("unknown pack command %q", args[0])
 }
 
 func snapshotDir() string { return filepath.Join(filepath.Dir(dbPath()), "snapshots") }
