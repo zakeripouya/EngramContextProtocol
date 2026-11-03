@@ -130,6 +130,9 @@ func ImportGit(ctx context.Context, st *store.Store, o GitOptions) (GitResult, e
 		o.MinCoFiles = 3
 	}
 	repoName := filepath.Base(filepath.Clean(o.Repo))
+	if abs, err := filepath.Abs(o.Repo); err == nil {
+		repoName = filepath.Base(abs) // "." would otherwise name the repo "."
+	}
 	commits, err := readCommits(ctx, o)
 	if err != nil {
 		return GitResult{}, err

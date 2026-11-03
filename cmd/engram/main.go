@@ -28,6 +28,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/zakeripouya/EngramContextProtocol/internal/bootstrap"
+	"github.com/zakeripouya/EngramContextProtocol/internal/dashboard"
 	"github.com/zakeripouya/EngramContextProtocol/internal/ecp"
 	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
 	"github.com/zakeripouya/EngramContextProtocol/internal/health"
@@ -81,6 +82,8 @@ Usage:
   engram permit report [--json]           how often Engram's predictions matched your permission decisions
   engram permit explain TOOL INPUT        show the tier and prediction for one tool call
   engram permit on | off                  turn shadow logging on or off (kill switch)
+  engram dashboard [--addr 127.0.0.1:7078] open the local dashboard (prints a link with an access token)
+  engram report --html [--out FILE]       write the static HTML report (also written after each sleep cycle)
   engram version                          print the version
 
 Database: $ENGRAM_DB, or ~/.engram/engram.db
@@ -348,6 +351,43 @@ func run(args []string) error {
 
 	case "permit":
 		return runPermit(st, rest)
+
+	case "dashboard":
+		fs := flag.NewFlagSet("dashboard", flag.ContinueOnError)
+		addr := fs.String("addr", "127.0.0.1:7078", "loopback address to serve on")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		host, _, err := net.SplitHostPort(*addr)
+		if err != nil {
+			return err
+		}
+		if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+			return fmt.Errorf("the dashboard only serves on loopback (127.0.0.1, localhost or ::1)")
+		}
+		ln, err := net.Listen("tcp", *addr)
+		if err != nil {
+			return err
+		}
+		token := dashboard.NewToken()
+		fmt.Printf("Engram dashboard: http://%s/#token=%s\n", ln.Addr(), token)
+		fmt.Println("The link carries a one-time token; keep it private. Press Ctrl+C to stop.")
+		hs := &http.Server{Handler: dashboard.Handler(st, token), ReadHeaderTimeout: 10 * time.Second}
+		return hs.Serve(ln)
+
+	case "report":
+		fs := flag.NewFlagSet("report", flag.ContinueOnError)
+		_ = fs.Bool("html", true, "write HTML (the only format)")
+		out := fs.String("out", "", "file to write; default report.html next to the database")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		path, err := writeHTMLReport(st, *out)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Wrote", path)
+		return nil
 
 	case "health":
 		asJSON := len(rest) > 0 && rest[0] == "--json"
@@ -620,6 +660,9 @@ func runSleep(st *store.Store, args []string) error {
 		}
 		fmt.Println()
 		printHealth(h)
+		if path, err := writeHTMLReport(st, ""); err == nil {
+			fmt.Println("\nReport:", path)
+		}
 		if h.Worst == health.Breach && rep.Snapshot != "" {
 			fmt.Printf("\nA health bound was breached. To roll back tonight's cycle: engram snapshot restore %s\n", rep.Snapshot)
 		}
@@ -997,4 +1040,20 @@ func runPermit(st *store.Store, args []string) error {
 		return nil
 	}
 	return fmt.Errorf("usage: engram permit report [--json] | explain TOOL INPUT | on | off")
+}
+
+// writeHTMLReport writes the static report, readable only by the user.
+func writeHTMLReport(st *store.Store, out string) (string, error) {
+	if out == "" {
+		out = filepath.Join(filepath.Dir(st.Path()), "report.html")
+	}
+	f, err := os.OpenFile(out, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if err := dashboard.WriteReport(st, f); err != nil {
+		f.Close()
+		return "", err
+	}
+	return out, f.Close()
 }

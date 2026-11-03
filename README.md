@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`) and M9 (permission assist in shadow mode) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`), M9 (permission assist in shadow mode) and M10 (the local dashboard, approvals inbox and static report) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
 
 ---
 
@@ -134,6 +134,8 @@ The scheduler calls `engram sleep run --if-due` every 15 minutes; it only works 
 | `engram permit report [--json]` | Agreement between Engram's predictions and your permission decisions |
 | `engram permit explain TOOL INPUT` | Tier and prediction for one tool call, such as `Bash "git push"` |
 | `engram permit on` / `off` | Kill switch for permission logging |
+| `engram dashboard [--addr 127.0.0.1:7078]` | Open the local dashboard; prints a link carrying a one-time access token |
+| `engram report --html [--out FILE]` | Write the static HTML report (also written as `report.html` after each sleep cycle) |
 | `engram version` | Print the engine and protocol versions |
 
 The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file.
@@ -184,7 +186,10 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | Push: `subscribe`, updates to the `engram://attention` resource, pending events in `attend` | ✅ M8 |
 | Permission assist, shadow mode: rule tiers, precedent-based predictions, outcome-aware confidence, agreement report | ✅ M9 |
 | Auto-approval | design (after shadow data shows very high agreement) |
-| Dashboard | design (M10) |
+| Local dashboard: overview, graph explorer, memory search, sleep changes with undo, health and self-test, triggers, sessions, agents, permission agreement | ✅ M10 |
+| Approvals inbox: keep or reject distilled facts, resolve conflicts | ✅ M10 |
+| Static HTML report after each sleep cycle | ✅ M10 |
+| Hosted dashboard, thought-path view, packs view | design |
 
 ---
 
@@ -517,7 +522,29 @@ Each mechanism is ablated individually. Engineering targets: recall under 100 ms
 
 ## Dashboard
 
-*Design (M10).* A mockup exists; the real dashboard reads through the same protocol and grants as agents.
+*Implemented in M10 as a local dashboard and a static report; the hosted view, thought paths and the packs view are design.*
+
+```bash
+engram dashboard          # → Engram dashboard: http://127.0.0.1:7078/#token=…
+engram report --html      # → ~/.engram/report.html (also written after every sleep cycle)
+```
+
+The dashboard is one Go binary serving an embedded page with no external requests. It listens on loopback only, and every API call needs the random token from the printed link (sent as a header, kept out of URLs the server sees) and a loopback `Host`, so other websites can neither read it through DNS rebinding nor change it with cross-site requests. A strict Content-Security-Policy allows only its own script, and memory content is always inserted as text. It is the user's own tool, so it reads every namespace, but it never pairs clients: pairing stays in the terminal.
+
+| View | Shows | Actions |
+| --- | --- | --- |
+| Overview | Memories, pathways, health, inbox, open tasks, trigger failures, last sleep cycle, namespaces | Jump to any view |
+| Inbox | Distilled facts with the memories they came from; conflicts side by side | Keep or reject a fact; pick the right side of a conflict |
+| Graph | The strongest and most used memories; color = kind, line width = weight, ring = recalled in the last day | Filter by namespace, zoom, drag, open a memory |
+| Memories | Search with the same recall agents use, without training pathways | Open a memory with its provenance and pathways |
+| Sleep | Every merge, archive and distilled fact of the last cycle; recent cycles | Undo a change |
+| Health | Bounds, not-yet-measurable bounds, nightly history, golden queries | Run the sandbox self-test |
+| Triggers | Event sources and recent events | Pause or resume |
+| Sessions | Checkpointed tasks, delegation, next steps | |
+| Agents | Grants and 30 days of activity per client | Revoke |
+| Permissions | Shadow-mode agreement per tier and the requests it would have wrongly approved | |
+
+Planned beyond M10:
 
 | View | Shows |
 | --- | --- |
@@ -896,7 +923,7 @@ Each milestone is roughly one to two weekends and has a done-check.
 **Phase 3 · Awareness**
 8. **M8 · Triggers and push.**
 9. **M9 · Permission assist** ✅ Shadow mode only.
-10. **M10 · Dashboard,** approvals inbox and static report.
+10. **M10 · Dashboard** ✅ Local dashboard, approvals inbox and static report.
 
 **Phase 4 · Distribution**
 11. **M11 · Packaging and protocol:** `engram init`, ECP v1, conformance suite, SDKs, Docker Compose, pack registry.

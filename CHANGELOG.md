@@ -2,6 +2,21 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.10.0] - 2026-11-03
+
+Engine milestone M10: the dashboard. This completes milestones M1 to M10.
+
+### Added
+
+- `engram dashboard`: a local web dashboard embedded in the binary. Views: overview, approvals inbox, graph explorer, memory search, sleep changes with undo, health with the sandbox self-test, triggers with pause and resume, sessions, agents with revoke, and permission-assist agreement.
+- Approvals inbox: keep or reject facts distilled during sleep (with their sources), and resolve conflicts by keeping one side (the other is archived as superseded).
+- Security: loopback only, a random per-run token in a header, a loopback `Host` check against DNS rebinding, a strict Content-Security-Policy, and memory content always rendered as text.
+- `engram report --html` and an automatic `report.html` (mode 0600) after each `engram sleep run`: a read-only snapshot with no scripts.
+
+### Fixed
+
+- Git imports from a relative path (`engram import git .`) name the repository after its directory instead of ".".
+
 ## [0.9.0] - 2026-11-03
 
 Engine milestone M9: permission assist, shadow mode only.

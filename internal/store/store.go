@@ -241,6 +241,12 @@ var migrations = []string{
 	  at         TEXT NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS permit_activity_by ON permit_activity(client, session_id, at);`,
+	// 9 (M10): approvals inbox reviews.
+	`CREATE TABLE IF NOT EXISTS reviews (
+	  memory_id TEXT PRIMARY KEY,
+	  verdict   TEXT NOT NULL,
+	  at        TEXT NOT NULL
+	);`,
 }
 
 // Accepted values (spec, "Data types").
@@ -317,11 +323,11 @@ type Scored struct {
 
 // Grant is one client's access to one namespace.
 type Grant struct {
-	Client    string
-	Namespace string
-	CanRead   bool
-	CanWrite  bool
-	ExpiresAt string
+	Client    string `json:"client"`
+	Namespace string `json:"namespace"`
+	CanRead   bool   `json:"read"`
+	CanWrite  bool   `json:"write"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
 }
 
 // ObserveInput is a write request.
