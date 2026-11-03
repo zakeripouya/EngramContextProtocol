@@ -5,7 +5,7 @@
 ## Generating JSON Schema
 
 ```bash
-npx ts-json-schema-generator --path spec/schema.ts --type '*' --out spec/schema.json
+npx ts-json-schema-generator --path spec/schema.ts --type '*' --no-type-check --out spec/schema.json
 ```
 
 Implementations in any language validate messages against the generated `schema.json`. The conformance suite (planned) will use it too.

@@ -173,6 +173,7 @@ export interface ObserveParams {
   sessionId?: string;
   author?: Author; // default "agent"; a decision requires "user"
   validFrom?: string;
+  supersedes?: string; // id of an older memory this replaces; it stops being current
 }
 export interface ObserveResult {
   id: string;
@@ -305,22 +306,28 @@ export type ECPRequest =
 /* Notifications                                                      */
 /* ------------------------------------------------------------------ */
 
-export type InitializedNotification = JSONRPCNotification<"notifications/initialized">;
+export interface InitializedNotification {
+  jsonrpc: "2.0";
+  method: "notifications/initialized";
+}
 
-export type RelevantNotification = JSONRPCNotification<
-  "notifications/engram/relevant",
-  { subscriptionId: string; memories: ScoredMemory[]; reason: string }
->;
+export interface RelevantNotification {
+  jsonrpc: "2.0";
+  method: "notifications/engram/relevant";
+  params: { subscriptionId: string; memories: ScoredMemory[]; reason: string };
+}
 
-export type ConflictNotification = JSONRPCNotification<
-  "notifications/engram/conflict",
-  { a: Memory; b: Memory; summary: string }
->;
+export interface ConflictNotification {
+  jsonrpc: "2.0";
+  method: "notifications/engram/conflict";
+  params: { a: Memory; b: Memory; summary: string };
+}
 
-export type ConsolidatedNotification = JSONRPCNotification<
-  "notifications/engram/consolidated",
-  { created: number; pruned: number; traits: string[] }
->;
+export interface ConsolidatedNotification {
+  jsonrpc: "2.0";
+  method: "notifications/engram/consolidated";
+  params: { created: number; pruned: number; traits: string[] };
+}
 
 /* ------------------------------------------------------------------ */
 /* Errors                                                             */

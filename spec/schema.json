@@ -1,0 +1,1537 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AttendParams": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "type": "string"
+        },
+        "goals": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "k": {
+          "type": "number"
+        },
+        "mode": {
+          "enum": [
+            "detail",
+            "explore",
+            "focus",
+            "generalize"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "context"
+      ],
+      "type": "object"
+    },
+    "AttendResult": {
+      "additionalProperties": false,
+      "properties": {
+        "conflicts": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "a": {
+                "type": "string"
+              },
+              "b": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "a",
+              "b",
+              "summary"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "memories": {
+          "items": {
+            "$ref": "#/definitions/ScoredMemory"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "memories",
+        "conflicts"
+      ],
+      "type": "object"
+    },
+    "Author": {
+      "enum": [
+        "user",
+        "agent",
+        "system"
+      ],
+      "type": "string"
+    },
+    "Checkpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "done": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "environment": {
+          "additionalProperties": false,
+          "properties": {
+            "repo": {
+              "type": "string"
+            },
+            "tools": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "next": {
+          "type": "string"
+        },
+        "openQuestions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "plan": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "goal",
+        "plan",
+        "done",
+        "namespace",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ClientCapabilities": {
+      "additionalProperties": {},
+      "properties": {
+        "notifications": {
+          "additionalProperties": false,
+          "properties": {
+            "conflict": {
+              "type": "boolean"
+            },
+            "relevant": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ClientInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ConflictNotification": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "notifications/engram/conflict",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": false,
+          "properties": {
+            "a": {
+              "$ref": "#/definitions/Memory"
+            },
+            "b": {
+              "$ref": "#/definitions/Memory"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "a",
+            "b",
+            "summary"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "ConsolidateParams": {
+      "additionalProperties": false,
+      "properties": {
+        "light": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ConsolidatedNotification": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "notifications/engram/consolidated",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": false,
+          "properties": {
+            "created": {
+              "type": "number"
+            },
+            "pruned": {
+              "type": "number"
+            },
+            "traits": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "created",
+            "pruned",
+            "traits"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "Decision": {
+      "additionalProperties": false,
+      "properties": {
+        "choice": {
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "situation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "situation",
+        "choice"
+      ],
+      "type": "object"
+    },
+    "DelegateParams": {
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "subtask": {
+          "type": "string"
+        },
+        "toAgent": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "subtask"
+      ],
+      "type": "object"
+    },
+    "ECPRequest": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22initialize%22%2CInitializeParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fobserve%22%2CObserveParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Frecall%22%2CRecallParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fget%22%2CGetParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fpath%22%2CPathParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fattend%22%2CAttendParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Ffeedback%22%2CFeedbackParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fforget%22%2CForgetParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fsubscribe%22%2CSubscribeParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Funsubscribe%22%2CUnsubscribeParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fconsolidate%22%2CConsolidateParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fsession%2Fcheckpoint%22%2CCheckpoint%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fsession%2Fresume%22%2CResumeParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fsession%2Flist%22%2CSessionListParams%3E"
+        },
+        {
+          "$ref": "#/definitions/JSONRPCRequest%3C%22engram%2Fsession%2Fdelegate%22%2CDelegateParams%3E"
+        }
+      ]
+    },
+    "Edge": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/EdgeKind"
+        },
+        "to": {
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "kind",
+        "weight"
+      ],
+      "type": "object"
+    },
+    "EdgeKind": {
+      "enum": [
+        "similar",
+        "coactive",
+        "about",
+        "derived",
+        "supersedes",
+        "conflicts",
+        "accepted",
+        "overrode",
+        "cross"
+      ],
+      "type": "string"
+    },
+    "ErrorCode": {
+      "enum": [
+        -32700,
+        -32600,
+        -32601,
+        -32602,
+        -32603,
+        -32001,
+        -32002,
+        -32003,
+        -32004,
+        -32005,
+        -32006,
+        -32007,
+        -32008
+      ],
+      "type": "number"
+    },
+    "FeedbackParams": {
+      "additionalProperties": false,
+      "properties": {
+        "correction": {
+          "$ref": "#/definitions/Decision"
+        },
+        "memoryIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "objective": {
+          "enum": [
+            "succeeded",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "accepted",
+            "overridden"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "memoryIds",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "ForgetParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cascade": {
+          "type": "boolean"
+        },
+        "ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    },
+    "ForgetResult": {
+      "additionalProperties": false,
+      "properties": {
+        "removed": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "removed"
+      ],
+      "type": "object"
+    },
+    "GetParams": {
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    },
+    "GetResult": {
+      "additionalProperties": false,
+      "properties": {
+        "memories": {
+          "items": {
+            "$ref": "#/definitions/Memory"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "memories"
+      ],
+      "type": "object"
+    },
+    "InitializeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "$ref": "#/definitions/ClientCapabilities"
+        },
+        "clientInfo": {
+          "$ref": "#/definitions/ClientInfo"
+        },
+        "protocolVersion": {
+          "type": "string"
+        },
+        "supportedVersions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "capabilities",
+        "clientInfo"
+      ],
+      "type": "object"
+    },
+    "InitializeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "$ref": "#/definitions/ServerCapabilities"
+        },
+        "protocolVersion": {
+          "type": "string"
+        },
+        "serverInfo": {
+          "$ref": "#/definitions/ServerInfo"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "capabilities",
+        "serverInfo"
+      ],
+      "type": "object"
+    },
+    "InitializedNotification": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "notifications/initialized",
+          "type": "string"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCError": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ErrorCode"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "data": {},
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "type": "object"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "error"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/attend\",AttendParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/attend",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/AttendParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/consolidate\",ConsolidateParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/consolidate",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ConsolidateParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/feedback\",FeedbackParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/feedback",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/FeedbackParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/forget\",ForgetParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/forget",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ForgetParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/get\",GetParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/get",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/GetParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/observe\",ObserveParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/observe",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ObserveParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/path\",PathParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/path",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/PathParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/recall\",RecallParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/recall",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/RecallParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/session/checkpoint\",Checkpoint>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/session/checkpoint",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/Checkpoint"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/session/delegate\",DelegateParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/session/delegate",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/DelegateParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/session/list\",SessionListParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/session/list",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/SessionListParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/session/resume\",ResumeParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/session/resume",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ResumeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/subscribe\",SubscribeParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/subscribe",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/SubscribeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"engram/unsubscribe\",UnsubscribeParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "engram/unsubscribe",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/UnsubscribeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JSONRPCRequest<\"initialize\",InitializeParams>": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "initialize",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/InitializeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "Memory": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "type": "number"
+        },
+        "content": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/NodeKind"
+        },
+        "lastActivatedAt": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/definitions/Provenance"
+        },
+        "scope": {
+          "$ref": "#/definitions/Scope"
+        },
+        "strength": {
+          "type": "number"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "validFrom": {
+          "type": "string"
+        },
+        "validTo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "content",
+        "scope",
+        "namespace",
+        "strength",
+        "provenance",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "NodeKind": {
+      "enum": [
+        "episode",
+        "concept",
+        "decision",
+        "suggestion",
+        "fact",
+        "trait",
+        "procedure"
+      ],
+      "type": "string"
+    },
+    "ObserveParams": {
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "$ref": "#/definitions/Author"
+        },
+        "content": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/definitions/Decision"
+        },
+        "kind": {
+          "enum": [
+            "episode",
+            "decision",
+            "suggestion",
+            "fact"
+          ],
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/Scope"
+        },
+        "service": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "supersedes": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "validFrom": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "content"
+      ],
+      "type": "object"
+    },
+    "ObserveResult": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "linked": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "linked"
+      ],
+      "type": "object"
+    },
+    "PathParams": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "rule": {
+          "enum": [
+            "maximin",
+            "most_probable"
+          ],
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "PathResult": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "weakestLink": {
+          "$ref": "#/definitions/Edge"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        },
+        "author": {
+          "$ref": "#/definitions/Author"
+        },
+        "client": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "client",
+        "author",
+        "at"
+      ],
+      "type": "object"
+    },
+    "RecallParams": {
+      "additionalProperties": false,
+      "properties": {
+        "asOf": {
+          "type": "string"
+        },
+        "includePaths": {
+          "type": "boolean"
+        },
+        "k": {
+          "type": "number"
+        },
+        "kinds": {
+          "items": {
+            "$ref": "#/definitions/NodeKind"
+          },
+          "type": "array"
+        },
+        "namespaces": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "query": {
+          "type": "string"
+        },
+        "spread": {
+          "type": "number"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "RecallResult": {
+      "additionalProperties": false,
+      "properties": {
+        "memories": {
+          "items": {
+            "$ref": "#/definitions/ScoredMemory"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "memories"
+      ],
+      "type": "object"
+    },
+    "RelevantNotification": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "type": "string"
+        },
+        "method": {
+          "const": "notifications/engram/relevant",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": false,
+          "properties": {
+            "memories": {
+              "items": {
+                "$ref": "#/definitions/ScoredMemory"
+              },
+              "type": "array"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "subscriptionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "subscriptionId",
+            "memories",
+            "reason"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "RequestId": {
+      "type": [
+        "string",
+        "number"
+      ]
+    },
+    "ResumeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "ResumeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint": {
+          "$ref": "#/definitions/Checkpoint"
+        },
+        "missing": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "checkpoint",
+        "missing"
+      ],
+      "type": "object"
+    },
+    "Scope": {
+      "enum": [
+        "private",
+        "team",
+        "public"
+      ],
+      "type": "string"
+    },
+    "ScoredMemory": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "type": "number"
+        },
+        "memory": {
+          "$ref": "#/definitions/Memory"
+        },
+        "path": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "memory",
+        "score"
+      ],
+      "type": "object"
+    },
+    "ServerCapabilities": {
+      "additionalProperties": {},
+      "properties": {
+        "attend": {
+          "additionalProperties": {
+            "not": {}
+          },
+          "type": "object"
+        },
+        "consolidate": {
+          "additionalProperties": {
+            "not": {}
+          },
+          "type": "object"
+        },
+        "feedback": {
+          "additionalProperties": {
+            "not": {}
+          },
+          "type": "object"
+        },
+        "forget": {
+          "additionalProperties": false,
+          "properties": {
+            "cascade": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "observe": {
+          "additionalProperties": false,
+          "properties": {
+            "kinds": {
+              "items": {
+                "$ref": "#/definitions/NodeKind"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "recall": {
+          "additionalProperties": false,
+          "properties": {
+            "maxK": {
+              "type": "number"
+            },
+            "spreadingActivation": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "sessions": {
+          "additionalProperties": {
+            "not": {}
+          },
+          "type": "object"
+        },
+        "subscribe": {
+          "additionalProperties": false,
+          "properties": {
+            "topics": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ServerInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "SessionListParams": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "open",
+            "done"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SubscribeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "threshold": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "context"
+      ],
+      "type": "object"
+    },
+    "SubscribeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "subscriptionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subscriptionId"
+      ],
+      "type": "object"
+    },
+    "UnsubscribeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "subscriptionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subscriptionId"
+      ],
+      "type": "object"
+    }
+  }
+}
