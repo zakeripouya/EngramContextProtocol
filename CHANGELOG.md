@@ -2,6 +2,22 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.7.0] - 2026-11-03
+
+Engine milestone M7: a second agent and sessions.
+
+### Added
+
+- MCP tools `checkpoint`, `sessions`, `resume` and `delegate` (ECP `engram/session/*`): any paired agent can continue a task another agent started.
+- `resume` reports what the resuming agent lacks (the repository, compared by owner and name; tools; write access) under `missing`, so it asks instead of assuming.
+- Finished tasks are recorded as episodes; a finished delegated subtask appends its result to the parent task.
+- Partial checkpoint updates keep the fields left out; checkpoints pass the secret filter and respect namespace grants.
+- `engram sessions`, `engram session show`, and `engram setup codex | cursor`.
+
+### Protocol
+
+- `Checkpoint` gains optional `status`, `result`, `parentId`, `delegatedTo`, `createdBy`, `lastClient` and `createdAt`; `ResumeParams` gains `environment`; `ResumeResult` gains `subtasks` and `memories`; `session/list` returns `sessions`. All additive.
+
 ## [0.6.0] - 2026-11-03
 
 Engine milestone M6: the testing harness.

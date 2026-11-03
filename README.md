@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) and M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) and M7 (sessions and handoff between agents) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
 
 ---
 
@@ -68,7 +68,7 @@ claude mcp add engram -- engram serve --client claude-code
 
 In Claude Code, say something durable: *"Remember that branches always start with the Jira ticket number."* In a new session, ask *"How should I name this branch?"* and watch it call `recall`.
 
-For Claude Desktop, run `engram setup claude-desktop` and paste the printed snippet into `claude_desktop_config.json`.
+For Claude Desktop, Codex or Cursor, run `engram setup claude-desktop` (or `codex`, `cursor`) and follow the printed steps. Every paired agent shares the same memory, and any of them can continue a task another one checkpointed: start a task in Claude Code, then tell Codex *"continue the billing migration"*.
 
 ### Embeddings (optional but recommended)
 
@@ -122,7 +122,9 @@ The scheduler calls `engram sleep run --if-due` every 15 minutes; it only works 
 | `engram health [--json]` | Check learning dynamics against healthy bounds and drift; also runs after every sleep cycle |
 | `engram selftest` | Golden, programmatic and mutation tests on a sandbox copy of your memory |
 | `engram golden add "QUERY" ID` / `golden list` | Add a query that must keep recalling a memory |
-| `engram setup claude-code` / `claude-desktop` | Print connection instructions |
+| `engram setup claude-code` / `claude-desktop` / `codex` / `cursor` | Print connection instructions |
+| `engram sessions [open\|done\|all]` | List tasks agents checkpointed |
+| `engram session show ID` | Show one task's checkpoint |
 | `engram version` | Print the engine and protocol versions |
 
 The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file.
@@ -164,7 +166,9 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | Health bounds: weight saturation, strength floor, hub degree, decision recall | ✅ M6 |
 | Drift detection (population stability index against the last week), recorded nightly | ✅ M6 |
 | Self-tests on a sandbox copy: golden queries, superseded facts, injected duplicate, poisoned memory, runaway hub | ✅ M6 |
-| Session handoff, second agent | design (M7) |
+| Sessions: `checkpoint`, `sessions`, `resume` (reports missing repo, tools and permissions), `delegate` | ✅ M7 |
+| Finished tasks become episodes; delegated results return to the parent task | ✅ M7 |
+| Setup for Codex and Cursor alongside Claude Code and Claude Desktop | ✅ M7 |
 | Triggers, push notifications, `attend` | design (M8) |
 | Permission assist (shadow mode) | design (M9) |
 | Dashboard | design (M10) |
@@ -351,7 +355,7 @@ It starts in **shadow mode** (predict, but you still decide), falls back to aski
 
 When you discuss the same subject with two different AIs, entity resolution links both conversations to one concept, and either agent's later recall surfaces both. Disagreements become `conflicts` edges and stay open until you decide. What an agent proposed and what you chose are always different node kinds.
 
-**Sessions and handoff** *(design, M7)*: an agent checkpoints the live task (goal, plan, done, next, open questions, files), and any paired agent on any device resumes it, with a report of anything missing in its environment. Agents can delegate subtasks with context attached.
+**Sessions and handoff** *(implemented in M7 for agents on one machine; cross-device resume needs sync, which is design)*: an agent checkpoints the live task (goal, plan, done, next, open questions, files), and any paired agent on any device resumes it, with a report of anything missing in its environment. Agents can delegate subtasks with context attached.
 
 **Interaction features**: a "while you were away" briefing, mid-task corrections recorded as overrides, and one approvals inbox for every agent's requests.
 
@@ -522,7 +526,7 @@ Delivery: a live local dashboard (default), a static HTML report regenerated eac
 
 ECP is JSON-RPC 2.0 over stdio or Streamable HTTP, extending MCP. The normative definition is [`spec/schema.ts`](spec/schema.ts); a generated [`spec/schema.json`](spec/schema.json) lets any language validate messages. The full prose specification is [docs/spec/ecp-v0.md](docs/spec/ecp-v0.md).
 
-**Today (M1)** the engine speaks the **MCP compatibility profile**: the methods below are exposed as MCP tools named `observe`, `recall`, `get` and `forget`, with the same parameters in snake_case (`valid_from`, `as_of`, `session_id`). Native `engram/*` methods arrive with M7 and M8.
+**Today** the engine speaks the **MCP compatibility profile**: the methods below are exposed as MCP tools named `observe`, `recall`, `get`, `forget`, `feedback`, `checkpoint`, `sessions`, `resume` and `delegate`, with the same parameters in snake_case (`valid_from`, `as_of`, `session_id`). The native `engram/*` JSON-RPC methods are the protocol definition, which the tools mirror.
 
 ### Envelope
 
@@ -627,7 +631,7 @@ A feature may be used only if the relevant side declared it. Servers MUST suppor
 | `engram/feedback` | `feedback` | Report accepts, overrides and outcomes | ✅ M4 |
 | `engram/subscribe`, `engram/unsubscribe` | resource subscription | Push notifications | design |
 | `engram/consolidate` | | Trigger a sleep cycle | design |
-| `engram/session/*` | | Checkpoint, resume, list, delegate | design |
+| `engram/session/checkpoint`, `resume`, `list`, `delegate` | `checkpoint`, `resume`, `sessions`, `delegate` | Task state shared between agents | ✅ M7 |
 
 #### `engram/observe`
 
@@ -759,7 +763,7 @@ Notifications go only to clients that declared the capability, never include mem
 
 `light` runs only decay and dedupe.
 
-#### Sessions *(design)*
+#### Sessions
 
 ```json
 {"jsonrpc": "2.0", "id": 12, "method": "engram/session/checkpoint", "params": {
@@ -773,14 +777,26 @@ Notifications go only to clients that declared the capability, never include mem
   "environment": {"repo": "ink-admin/INK", "tools": ["node", "pnpm"]},
   "namespace": "team/ink",
   "updatedAt": "2026-11-03T16:20:00Z"}}
-{"jsonrpc": "2.0", "id": 12, "result": {"sessionId": "sess_81c2"}}
+{"jsonrpc": "2.0", "id": 12, "result": {"sessionId": "sess_81c2", "goal": "Independent-artist dashboard", "status": "open",
+  "createdBy": "claude-code", "lastClient": "claude-code", "updatedAt": "2026-11-03T16:20:00Z"}}
 
-{"jsonrpc": "2.0", "id": 13, "method": "engram/session/resume", "params": {"sessionId": "sess_81c2"}}
-{"jsonrpc": "2.0", "id": 13, "result": {"checkpoint": {"sessionId": "sess_81c2", "goal": "Independent-artist dashboard"}, "missing": ["pnpm"]}}
+{"jsonrpc": "2.0", "id": 13, "method": "engram/session/resume", "params": {"sessionId": "sess_81c2",
+  "environment": {"repo": "github.com/ink-admin/INK", "tools": ["node"]}}}
+{"jsonrpc": "2.0", "id": 13, "result": {
+  "checkpoint": {"sessionId": "sess_81c2", "goal": "Independent-artist dashboard", "next": "Route artists to the shop dashboard"},
+  "missing": ["tool: pnpm"],
+  "subtasks": [],
+  "memories": []}}
 
 {"jsonrpc": "2.0", "id": 14, "method": "engram/session/list", "params": {"status": "open"}}
+{"jsonrpc": "2.0", "id": 14, "result": {"sessions": [{"sessionId": "sess_81c2", "goal": "Independent-artist dashboard", "status": "open"}]}}
+
 {"jsonrpc": "2.0", "id": 15, "method": "engram/session/delegate", "params": {"sessionId": "sess_81c2", "subtask": "Write tests for the artist route", "toAgent": "codex"}}
+{"jsonrpc": "2.0", "id": 15, "result": {"sessionId": "sess_9a01", "goal": "Write tests for the artist route", "status": "open",
+  "parentId": "sess_81c2", "delegatedTo": "codex"}}
 ```
+
+Omitting `sessionId` in `checkpoint` starts a new session; on update, fields left out keep their values. `status: "done"` with a `result` records a `Finished task` episode in long-term memory and, for a delegated subtask, appends the result to the parent's `done`. `missing` lists the repository (compared by owner and name, so a local path matches its remote), tools and write access the task needs that the resuming agent lacks. Checkpoints pass the same secret filter as memories.
 
 ### Errors
 
@@ -841,7 +857,7 @@ Each milestone is roughly one to two weekends and has a done-check.
 **Phase 2 · Sleep and safety**
 5. **M5 · Sleep cycle v1** ✅ Sleep hours, verifier, morning report, undo and rollback.
 6. **M6 · Testing harness** ✅ Bounds, drift detection, golden, programmatic and mutation tests.
-7. **M7 · Second agent and sessions:** a task started in Claude Code finishes in Codex without re-explaining.
+7. **M7 · Second agent and sessions** ✅ A task started in Claude Code finishes in Codex without re-explaining.
 
 **Phase 3 · Awareness**
 8. **M8 · Triggers and push.**

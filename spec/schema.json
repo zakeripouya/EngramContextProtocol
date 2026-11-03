@@ -81,6 +81,15 @@
     "Checkpoint": {
       "additionalProperties": false,
       "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "createdBy": {
+          "type": "string"
+        },
+        "delegatedTo": {
+          "type": "string"
+        },
         "done": {
           "items": {
             "type": "string"
@@ -111,6 +120,9 @@
         "goal": {
           "type": "string"
         },
+        "lastClient": {
+          "type": "string"
+        },
         "namespace": {
           "type": "string"
         },
@@ -123,13 +135,26 @@
           },
           "type": "array"
         },
+        "parentId": {
+          "type": "string"
+        },
         "plan": {
           "items": {
             "type": "string"
           },
           "type": "array"
         },
+        "result": {
+          "type": "string"
+        },
         "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "open",
+            "done"
+          ],
           "type": "string"
         },
         "updatedAt": {
@@ -1326,6 +1351,21 @@
     "ResumeParams": {
       "additionalProperties": false,
       "properties": {
+        "environment": {
+          "additionalProperties": false,
+          "properties": {
+            "repo": {
+              "type": "string"
+            },
+            "tools": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
         "sessionId": {
           "type": "string"
         }
@@ -1341,9 +1381,48 @@
         "checkpoint": {
           "$ref": "#/definitions/Checkpoint"
         },
+        "memories": {
+          "items": {
+            "$ref": "#/definitions/Memory"
+          },
+          "type": "array"
+        },
         "missing": {
           "items": {
             "type": "string"
+          },
+          "type": "array"
+        },
+        "subtasks": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "delegatedTo": {
+                "type": "string"
+              },
+              "goal": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "sessionId",
+              "goal",
+              "status"
+            ],
+            "type": "object"
           },
           "type": "array"
         }
@@ -1489,6 +1568,21 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "SessionListResult": {
+      "additionalProperties": false,
+      "properties": {
+        "sessions": {
+          "items": {
+            "$ref": "#/definitions/Checkpoint"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sessions"
+      ],
       "type": "object"
     },
     "SubscribeParams": {

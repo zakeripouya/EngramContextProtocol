@@ -5,7 +5,7 @@
 //	engram clients                             list paired clients and their grants
 //	engram revoke NAME                         remove all of a client's grants
 //	engram stats                               counts of memories, edges and clients
-//	engram setup claude-code|claude-desktop    print connection instructions
+//	engram setup claude-code|claude-desktop|codex|cursor    print connection instructions
 //
 // The database lives at $ENGRAM_DB, or ~/.engram/engram.db by default.
 package main
@@ -63,7 +63,9 @@ Usage:
   engram selftest                         run golden, programmatic and mutation tests on a sandbox copy
   engram golden add "QUERY" MEMORY_ID     add a query that must keep recalling a memory
   engram golden list                      list golden queries
-  engram setup claude-code|claude-desktop print connection instructions
+  engram setup HOST                       print connection instructions: claude-code, claude-desktop, codex, cursor
+  engram sessions [open|done|all]         list tasks agents checkpointed
+  engram session show ID                  show one task's checkpoint
   engram version                          print the version
 
 Database: $ENGRAM_DB, or ~/.engram/engram.db
@@ -256,6 +258,42 @@ func run(args []string) error {
 	case "sleep":
 		return runSleep(st, rest)
 
+	case "sessions":
+		status := "open"
+		if len(rest) > 0 {
+			status = rest[0]
+		}
+		if status == "all" {
+			status = ""
+		}
+		list, err := st.AllSessions(status)
+		if err != nil {
+			return err
+		}
+		if len(list) == 0 {
+			fmt.Println("No sessions.")
+		}
+		for _, c := range list {
+			who := c.LastClient
+			if c.DelegatedTo != "" {
+				who += " → " + c.DelegatedTo
+			}
+			fmt.Printf("%s  %-4s  %-10s %-20s %s\n", c.SessionID, c.Status, c.Namespace, who, store.Short(c.Goal))
+		}
+		return nil
+
+	case "session":
+		if len(rest) != 2 || rest[0] != "show" {
+			return fmt.Errorf("usage: engram session show ID")
+		}
+		c, err := st.Session(rest[1])
+		if err != nil {
+			return err
+		}
+		b, _ := json.MarshalIndent(c, "", "  ")
+		fmt.Println(string(b))
+		return nil
+
 	case "health":
 		asJSON := len(rest) > 0 && rest[0] == "--json"
 		r, err := health.Check(st, lastDecisionRecall(st), false)
@@ -327,7 +365,7 @@ func run(args []string) error {
 
 func setup(args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: engram setup claude-code|claude-desktop")
+		return fmt.Errorf("usage: engram setup claude-code|claude-desktop|codex|cursor")
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -343,8 +381,19 @@ func setup(args []string) error {
 		fmt.Println(`Add this to claude_desktop_config.json under "mcpServers":`)
 		fmt.Printf(`  "engram": {"command": %q, "args": ["serve", "--client", "claude-desktop"]}`+"\n", exe)
 		fmt.Println("Then approve it:  engram pair claude-desktop --read me --write me")
+	case "codex":
+		fmt.Println("1. Approve Codex (you do this, not the agent):")
+		fmt.Println("     engram pair codex --read me --write me")
+		fmt.Println("2. Add this to ~/.codex/config.toml:")
+		fmt.Println("     [mcp_servers.engram]")
+		fmt.Printf("     command = %q\n", exe)
+		fmt.Println(`     args = ["serve", "--client", "codex"]`)
+	case "cursor":
+		fmt.Println(`Add this to ~/.cursor/mcp.json (or .cursor/mcp.json in a project) under "mcpServers":`)
+		fmt.Printf(`  "engram": {"command": %q, "args": ["serve", "--client", "cursor"]}`+"\n", exe)
+		fmt.Println("Then approve it:  engram pair cursor --read me --write me")
 	default:
-		return fmt.Errorf("unknown host %q; supported: claude-code, claude-desktop", args[0])
+		return fmt.Errorf("unknown host %q; supported: claude-code, claude-desktop, codex, cursor", args[0])
 	}
 	return nil
 }

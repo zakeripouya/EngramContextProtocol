@@ -64,7 +64,7 @@ func TestToolsAreListed(t *testing.T) {
 	for _, tool := range res.Tools {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"observe", "recall", "get", "forget"} {
+	for _, want := range []string{"observe", "recall", "get", "forget", "feedback", "checkpoint", "sessions", "resume", "delegate"} {
 		if !names[want] {
 			t.Errorf("missing tool %q", want)
 		}
@@ -127,5 +127,43 @@ func TestClientInfoNameIsUsedWhenNoClientIsFixed(t *testing.T) {
 	cs := connect(t, st, "")
 	if res, text := call(t, cs, "observe", map[string]any{"kind": "fact", "content": "hello from the test client"}); res.IsError {
 		t.Fatalf("identity from clientInfo was not used: %s", text)
+	}
+}
+
+// M7 done-when: a task started in Claude Code is finished in Codex without re-explaining.
+func TestHandoffFromClaudeCodeToCodex(t *testing.T) {
+	st := open(t, filepath.Join(t.TempDir(), "engram.db"))
+	for _, c := range []string{"claude-code", "codex"} {
+		if err := st.Pair(c, []string{"me"}, []string{"me"}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cc := connect(t, st, "claude-code")
+	res, _ := call(t, cc, "checkpoint", map[string]any{
+		"goal": "Migrate the billing service to Postgres", "plan": []string{"schema", "dual writes", "cutover"},
+		"done": []string{"schema"}, "next": "enable dual writes behind the flag",
+		"environment": map[string]any{"repo": "github.com/acme/billing", "tools": []string{"psql"}},
+	})
+	if res.IsError {
+		t.Fatalf("checkpoint failed: %+v", res)
+	}
+	id := res.StructuredContent.(map[string]any)["sessionId"].(string)
+
+	cx := connect(t, st, "codex")
+	res, text := call(t, cx, "sessions", map[string]any{})
+	if res.IsError || !strings.Contains(text, id) {
+		t.Fatalf("codex should list the session: %s", text)
+	}
+	res, text = call(t, cx, "resume", map[string]any{"session_id": id, "environment": map[string]any{"repo": "acme/billing"}})
+	if res.IsError || !strings.Contains(text, "enable dual writes") || !strings.Contains(text, "tool: psql") {
+		t.Fatalf("resume should carry the next step and report psql missing: %s", text)
+	}
+	res, _ = call(t, cx, "checkpoint", map[string]any{"session_id": id, "status": "done", "result": "cut over on Friday"})
+	if res.IsError {
+		t.Fatalf("finishing failed: %+v", res)
+	}
+	_, text = call(t, cc, "recall", map[string]any{"query": "billing Postgres migration"})
+	if !strings.Contains(text, "cut over on Friday") {
+		t.Fatalf("claude-code should recall the outcome: %s", text)
 	}
 }

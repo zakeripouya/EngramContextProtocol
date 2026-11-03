@@ -133,6 +133,11 @@ All methods are client-to-server requests.
 
 Checkpoints carry in-progress work between agents and devices. `resume` returns `missing`: the environment requirements of the checkpoint (a repo, a tool) that the resuming client does not declare, so the agent can ask rather than assume.
 
+- `checkpoint` without `sessionId` creates a session; with one, it updates it, and fields left out keep their values. A session never moves between namespaces.
+- The resuming client SHOULD send its own `environment`. Servers SHOULD compare repositories by owner and name, so a local checkout matches its remote URL, and MUST list missing write access to the session's namespace.
+- When a session becomes `done`, servers SHOULD record its goal and `result` as an `episode` with the session's id, and, for a delegated subtask (`parentId`), append the result to the parent's `done`.
+- Checkpoints are subject to the same grants and content filters as memories.
+
 ### Pairing
 
 A client MUST be paired before any request other than `initialize`. Pairing is completed by the user **outside the protocol** (the dashboard or a CLI prompt), so that no agent can grant itself access, and yields a grant per namespace: `read`, `write` or both, with an optional expiry.

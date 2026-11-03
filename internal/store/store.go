@@ -153,6 +153,21 @@ var migrations = []string{
 	  namespace TEXT NOT NULL,
 	  added_at  TEXT NOT NULL
 	);`,
+	// 6 (M7): sessions and handoff.
+	`CREATE TABLE IF NOT EXISTS sessions (
+	  id           TEXT PRIMARY KEY,
+	  namespace    TEXT NOT NULL,
+	  status       TEXT NOT NULL,
+	  parent_id    TEXT,
+	  delegated_to TEXT,
+	  goal         TEXT NOT NULL,
+	  state        TEXT NOT NULL,
+	  created_at   TEXT NOT NULL,
+	  updated_at   TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_id);
+	CREATE INDEX IF NOT EXISTS sessions_ns ON sessions(namespace, status);
+	CREATE INDEX IF NOT EXISTS memories_session ON memories(session_id);`,
 }
 
 // Accepted values (spec, "Data types").

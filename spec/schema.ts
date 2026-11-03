@@ -268,17 +268,30 @@ export interface Checkpoint {
   files?: string[];
   environment?: { repo?: string; tools?: string[] };
   namespace: string;
+  status?: "open" | "done"; // default "open"; "done" records the outcome as an episode
+  result?: string; // what was achieved, when done
+  parentId?: string; // set on delegated subtasks
+  delegatedTo?: string;
+  createdBy?: string; // server-set
+  lastClient?: string; // server-set
+  createdAt?: string; // server-set
   updatedAt: string;
 }
 export interface ResumeParams {
   sessionId: string;
+  environment?: { repo?: string; tools?: string[] }; // what the resuming client has
 }
 export interface ResumeResult {
   checkpoint: Checkpoint;
-  missing: string[];
+  missing: string[]; // "repo: …", "tool: …", "permission: …"
+  subtasks?: { sessionId: string; goal: string; status: "open" | "done"; delegatedTo?: string; result?: string }[];
+  memories?: Memory[]; // recent memories recorded under this session
 }
 export interface SessionListParams {
   status?: "open" | "done";
+}
+export interface SessionListResult {
+  sessions: Checkpoint[];
 }
 export interface DelegateParams {
   sessionId: string;
