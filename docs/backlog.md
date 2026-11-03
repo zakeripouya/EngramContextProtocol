@@ -59,6 +59,8 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
   - [ ] Temporal linking: same-session episodes get weak edges.
   - [ ] Reconsolidation: recall opens a logged correction window.
   - [ ] Global workspace: `attend` as a limited stage broadcast to subscribers.
+- [ ] Self-tuning parameters: let the sleep cycle propose changes to Engram's own hand-set constants (recall mix 0.75/0.25, damping 0.9, learning rate 0.15, cutoffs, `attend` salience weights) by searching them against held-out feedback. Proposals are bounded, logged, applied only if they beat the current values on held-out data and health bounds, need approval by default, and roll back with the snapshot. `v2` `M`
+- [ ] Local model adaptation (research, off by default): a LoRA adapter on a local model trained on the user's approved decisions, so the model itself carries some of the style. Open problems: it can't honor `forget` or provenance (a fact baked into weights has no source and can't be deleted except by retraining), catastrophic forgetting, and evaluation. The graph stays the source of truth either way. `research` `L`
 - [ ] Neuromodulation as bounded control signals: dopamine (outcome-gated learning; partly done via three-factor), norepinephrine (urgency narrows search), acetylcholine (encode vs. retrieve), serotonin (long-term vs. recent precedent). Logged, slow and bounded. `v2` `M`
 - [ ] v3 and research: pattern separation and completion via sparse codes; cognitive maps (reusing relational structure across domains). `research`
 
@@ -68,7 +70,11 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 - [ ] A* with embedding distance for connecting two known concepts. `v2` `M`
 - [ ] "Don't know" answers: return nothing, explicitly, when confidence is low across the board. `polish` `S`
 - [ ] Calibrated confidence (isotonic or Platt) once feedback data exists. Today it's heuristic. `v2` `M`
-- [ ] Learning-to-rank trained on accepts and overrides, after a few hundred feedback events. `v2` `L`
+- [ ] Learning-to-rank with gradient-boosted trees (XGBoost or LightGBM, `rank:pairwise` / `lambdarank`), trained on accepts and overrides. `v2` `L`
+  - Features per recalled item: keyword score, meaning score, prior, strength, use count, age, hop count, pathway weight, edge kinds on the path, memory kind, overridden flag, namespace match.
+  - Labels from the feedback table: succeeded or accepted = relevant, failed or overridden = not; items shown but never used = weak negatives.
+  - Train in a Python worker during the sleep cycle (§13); save the model with a version; score in Go with a pure-Go reader of the model file (for example `leaves`), so no Python runs at recall time.
+  - Gate: keep the hand-set formula as baseline; switch only when the model wins on held-out feedback (NDCG@5 and accept rate), per namespace, with one-command rollback. Below a few hundred labels, try logistic regression instead.
 - [ ] Decision prediction API: predict a choice for a new situation, *with the precedents behind it*. This is the core "knows how you decide" claim. `v2` `L`
 - [ ] Monte Carlo tree search for dreaming (proposing hypotheses), an adversarial verifier for claims, and minimax regret for trigger actions. `research` `L`
 
@@ -154,6 +160,7 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 - [ ] Auto-approval per tier, only after the report shows readiness (50 resolved allow predictions at precision ≥ 0.98), with a per-tier switch. `v2` `M`
 - [ ] "Unusual means ask": inputs unlike any precedent, actions following web or email content (taint tracking), and an anomaly detector. `v2` `L`
 - [ ] Classify MCP tools (read-only vs. writes) instead of always asking. `v2` `M`
+- [ ] Learned permission model: gradient-boosted trees (or logistic regression at first) over the shadow-mode log, replacing the Beta approval count. Features: tier, command and arguments, file types, working directory, time of day, recent failures, client. Same Python-train / Go-score split as learning-to-rank. Ships only if the agreement report shows it beats the current rule. A good first ML item: the data and the success metric already exist. `v2` `M`
 - [ ] Daily audit review of auto-approvals with their precedents. `v2` `S`
 - [ ] Other hosts' permission hooks (Codex, Cursor) if they expose them. `v2` `M`
 - [ ] Re-check the Claude Code hook semantics as they evolve. Denials are inferred because no hook fires on a manual deny, and `PermissionRequest` carries no `tool_use_id`. `polish` `S`
