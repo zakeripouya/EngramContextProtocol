@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -99,6 +100,23 @@ var migrations = []string{
 	  at     TEXT NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS coactivations_pair ON coactivations(a, b, client, at);`,
+
+	// 2 (M3): keys for idempotent imports.
+	`CREATE TABLE IF NOT EXISTS import_keys (
+	  key       TEXT PRIMARY KEY,
+	  memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE
+	);`,
+
+	// 3 (M4): feedback events, kept as training data for ranking and decision prediction.
+	`CREATE TABLE IF NOT EXISTS feedback (
+	  at        TEXT NOT NULL,
+	  client    TEXT NOT NULL,
+	  memory_id TEXT NOT NULL,
+	  outcome   TEXT NOT NULL,
+	  objective TEXT,
+	  query     TEXT
+	);
+	CREATE INDEX IF NOT EXISTS feedback_memory ON feedback(memory_id);`,
 }
 
 // Accepted values (spec, "Data types").
@@ -166,10 +184,11 @@ type Memory struct {
 
 // Scored is a recall result. Path is set when the memory was reached through a pathway.
 type Scored struct {
-	Memory Memory   `json:"memory"`
-	Score  float64  `json:"score"`
-	Reason string   `json:"reason"`
-	Path   []string `json:"path,omitempty"`
+	Memory     Memory   `json:"memory"`
+	Score      float64  `json:"score"`
+	Confidence float64  `json:"confidence"`
+	Reason     string   `json:"reason"`
+	Path       []string `json:"path,omitempty"`
 }
 
 // Grant is one client's access to one namespace.
@@ -205,7 +224,7 @@ type RecallInput struct {
 	Tags       []string
 	Namespaces []string
 	AsOf       string
-	Hops       int // spreading-activation hops: 0 = direct matches only, 1 (default from the server) = one hop
+	Hops       int // spreading-activation hops, 0 to 3: 0 = direct matches only (the server defaults to 2)
 }
 
 // Store is one Engram instance.
@@ -756,7 +775,7 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 	}
 	args = append([]any{model}, args...)
 	args = append(args, maxCandidates)
-	rows, err := s.db.Query(`SELECT `+memoryColumnsM+`, v.vec FROM memories m
+	rows, err := s.db.Query(`SELECT `+memoryColumnsM+`, m.activations, v.vec FROM memories m
 		LEFT JOIN vectors v ON v.memory_id = m.id AND v.model = ?
 		WHERE `+strings.Join(where, " AND ")+` ORDER BY m.created_at DESC LIMIT ?`, args...)
 	if err != nil {
@@ -765,9 +784,11 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 	var mems []Memory
 	var vecs [][]float32
 	var docs []doc
+	var acts []int
 	for rows.Next() {
 		var vb []byte
-		m, err := scanMemoryWith(rows, &vb)
+		var n int
+		m, err := scanMemoryWith(rows, &n, &vb)
 		if err != nil {
 			rows.Close()
 			return nil, err
@@ -776,6 +797,7 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 			continue
 		}
 		mems = append(mems, m)
+		acts = append(acts, n)
 		if len(vb) > 0 {
 			vecs = append(vecs, decodeVec(vb))
 		} else {
@@ -788,15 +810,18 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 	// Direct relevance: keywords and, when available, vector similarity.
 	kw := bm25(query, docs)
 	minSim := s.learn.MinSimilarity
+	now := Now()
 	type cand struct {
-		score  float64
-		reason string
-		path   []string
+		score, conf float64
+		reason      string
+		path        []string
 	}
 	scored := map[int]cand{}
 	index := map[string]int{}
+	prior := make([]float64, len(mems)) // how readily each memory comes to mind, 0..1
 	for i, m := range mems {
 		index[m.ID] = i
+		prior[i] = 0.6*m.Strength + 0.4*baseLevel(acts[i], m.CreatedAt, now)
 		kwScore := 0.0
 		if kw[i] > 0 {
 			kwScore = kw[i] / (kw[i] + 1)
@@ -810,73 +835,136 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 		if kwScore == 0 && !hasSem {
 			continue
 		}
-		rel := kwScore
+		rel, conf := kwScore, kwScore
 		reason := "keyword match"
 		if qvec != nil {
 			rel = 0.5*kwScore + 0.5*sem
+			conf = rel
 			switch {
 			case hasSem && kwScore > 0:
 				reason = "meaning and keyword match"
+				conf = math.Min(1, rel*1.25) // two independent signals agree
 			case hasSem:
 				reason = "meaning match"
 			}
 		}
-		scored[i] = cand{score: 0.75*rel + 0.25*m.Strength, reason: reason}
+		if m.Kind == "decision" {
+			reason += ", user decision"
+		}
+		scored[i] = cand{score: 0.75*rel + 0.25*prior[i], conf: conf, reason: reason}
 	}
 
-	// One hop of spreading activation through learned and similarity edges.
-	if in.Hops > 0 && len(scored) > 0 {
-		seeds := make([]int, 0, len(scored))
+	// Memories the user explicitly overrode are demoted, and say so.
+	if len(scored) > 0 {
+		ids := make([]string, 0, len(scored))
 		for i := range scored {
-			seeds = append(seeds, i)
+			ids = append(ids, mems[i].ID)
 		}
-		sort.Slice(seeds, func(a, b int) bool { return scored[seeds[a]].score > scored[seeds[b]].score })
-		if len(seeds) > 10 {
-			seeds = seeds[:10]
-		}
-		seedIDs := make([]string, len(seeds))
-		for k, i := range seeds {
-			seedIDs[k] = mems[i].ID
-		}
-		nbs, err := s.neighbors(seedIDs)
+		rows, err := s.db.Query(`SELECT DISTINCT dst FROM edges WHERE kind = 'overrode' AND dst IN (`+placeholders(len(ids))+`)`, toAny(ids)...)
 		if err != nil {
 			return nil, err
 		}
-		for _, si := range seeds {
-			seed := mems[si]
-			for _, n := range nbs[seed.ID] {
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			i := index[id]
+			c := scored[i]
+			c.score *= 0.5
+			c.reason += ", overridden by the user"
+			scored[i] = c
+		}
+		rows.Close()
+	}
+
+	// Spreading activation: a beam of the strongest activations spreads along
+	// learned and similarity edges, a_j = a_i · w / √deg(i), for up to 3 hops.
+	hops := max(0, min(in.Hops, 3))
+	frontier := make([]int, 0, len(scored))
+	for i := range scored {
+		frontier = append(frontier, i)
+	}
+	for hop := 0; hop < hops && len(frontier) > 0; hop++ {
+		sort.Slice(frontier, func(a, b int) bool { return scored[frontier[a]].score > scored[frontier[b]].score })
+		if len(frontier) > 10 {
+			frontier = frontier[:10]
+		}
+		ids := make([]string, len(frontier))
+		for k, i := range frontier {
+			ids[k] = mems[i].ID
+		}
+		nbs, err := s.neighbors(ids)
+		if err != nil {
+			return nil, err
+		}
+		var next []int
+		for _, si := range frontier {
+			src := scored[si]
+			deg := math.Max(1, float64(len(nbs[mems[si].ID])))
+			for _, n := range nbs[mems[si].ID] {
 				j, ok := index[n.id] // only memories that pass this query's filters
 				if !ok {
 					continue
 				}
-				act := scored[si].score * n.weight * 0.6
+				act := src.score * n.weight * 0.9 / math.Sqrt(deg)
 				if cur, ok := scored[j]; ok && cur.score >= act {
 					continue
 				}
-				scored[j] = cand{score: act, reason: "via " + n.kind + " pathway from " + seed.ID, path: []string{seed.ID, n.id}}
+				path := append(append([]string{}, src.path...), n.id)
+				if len(src.path) == 0 {
+					path = []string{mems[si].ID, n.id}
+				}
+				scored[j] = cand{score: act, conf: src.conf * n.weight,
+					reason: "via " + n.kind + " pathway from " + path[0], path: path}
+				next = append(next, j)
 			}
 		}
+		frontier = next
 	}
 
-	results := make([]Scored, 0, len(scored))
+	order := make([]int, 0, len(scored))
 	for i, c := range scored {
-		results = append(results, Scored{Memory: mems[i], Score: round4(c.score), Reason: c.reason, Path: c.path})
-	}
-	sort.SliceStable(results, func(i, j int) bool {
-		if results[i].Score != results[j].Score {
-			return results[i].Score > results[j].Score
+		if c.score >= 0.005 && c.conf >= 0.01 { // drop noise; weak pathways still surface, ranked last with low confidence
+			order = append(order, i)
 		}
-		return results[i].Memory.ID < results[j].Memory.ID
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		ca, cb := scored[order[a]], scored[order[b]]
+		if ca.score != cb.score {
+			return ca.score > cb.score
+		}
+		return mems[order[a]].ID < mems[order[b]].ID
 	})
-	if len(results) > in.K {
-		results = results[:in.K]
+	// Lateral inhibition: a near-duplicate of a better result is suppressed.
+	results := make([]Scored, 0, in.K)
+	var kept []int
+	for _, i := range order {
+		dup := false
+		for _, k := range kept {
+			if nearDuplicate(mems[i], mems[k], vecs[i], vecs[k]) {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			continue
+		}
+		kept = append(kept, i)
+		c := scored[i]
+		results = append(results, Scored{Memory: mems[i], Score: round4(c.score), Confidence: round4(math.Min(1, c.conf)),
+			Reason: c.reason, Path: c.path})
+		if len(results) == in.K {
+			break
+		}
 	}
 	if !historical && len(results) > 0 {
-		now := ts(Now())
+		stamp := ts(now)
 		ids := make([]string, len(results))
 		for i, r := range results {
 			ids[i] = r.Memory.ID
-			if _, err := s.db.Exec(`UPDATE memories SET last_activated_at = ?, activations = activations + 1 WHERE id = ?`, now, r.Memory.ID); err != nil {
+			if _, err := s.db.Exec(`UPDATE memories SET last_activated_at = ?, activations = activations + 1 WHERE id = ?`, stamp, r.Memory.ID); err != nil {
 				return nil, err
 			}
 		}

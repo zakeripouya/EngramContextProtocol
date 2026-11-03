@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) and M3 (bootstrapping from git, Jira and pathway packs) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) and M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
 
 ---
 
@@ -128,11 +128,16 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | kNN wiring: new memories link to similar ones in their namespace | ✅ M2 |
 | Hebbian learning: memories recalled together build pathways, with anti-echo | ✅ M2 |
 | Decay and pruning of learned pathways | ✅ M2 |
-| Pathway recall: one hop of spreading activation, with paths and reasons | ✅ M2 |
+| Pathway recall with paths and reasons | ✅ M2 |
 | Bootstrapping: git commits, co-changed files and detected conventions | ✅ M3 |
 | Jira and generic JSON import | ✅ M3 |
 | Pathway packs: built-in Developer pack, install and remove | ✅ M3 |
-| Multi-hop spreading, feedback, confidence | design (M4) |
+| Multi-hop spreading activation (beam of 10, up to 3 hops, 1/√degree fan penalty) | ✅ M4 |
+| `feedback` tool: accepts, overrides with corrections, and real outcomes | ✅ M4 |
+| Three-factor learning: recall gives half a Hebbian step, confirmed outcomes the rest | ✅ M4 |
+| ACT-R base-level activation from frequency and recency | ✅ M4 |
+| Lateral inhibition of near-duplicate results | ✅ M4 |
+| Confidence on every result; overridden memories demoted | ✅ M4 |
 | Sleep cycle, verifier, morning report | design (M5) |
 | Session handoff, second agent | design (M7) |
 | Triggers, push notifications, `attend` | design (M8) |
@@ -212,7 +217,7 @@ Learning in one namespace never changes another's weights. Links between namespa
 
 ## How Engram learns
 
-*kNN wiring, Hebbian learning with anti-echo, and decay are implemented (M2); sparse codes, three-factor learning and feedback are design (M4 and later).*
+*kNN wiring, Hebbian learning with anti-echo and decay (M2), and feedback with three-factor learning (M4) are implemented; sparse codes are design.*
 
 **Encoding.** Each memory gets a dense embedding (a small local model such as `all-MiniLM-L6-v2`, 384 dimensions) for similarity, and a **sparse block code** (initially 64 blocks of 128 positions, one active per block, about 0.8% density) for brain-like operations: overlap = similarity, per-block shifts bind two concepts reversibly, per-block voting bundles several into a composite thought. A train of thought is the sequence of codes that spreading activation visits, which can be stored and replayed.
 
@@ -232,7 +237,7 @@ w_ij ← (1 − λ) · w_ij + η · a_i · a_j
 
 ## Retrieval
 
-*Implemented in M2: keyword and vector seeding, one hop of spreading activation, ranking and paths. Multi-hop beam search, confidence and `attend` are design (M4, M8).*
+*Implemented (M2, M4): keyword and vector seeding, ACT-R priors, multi-hop beam spreading with paths, lateral inhibition and confidence. `attend` and maximin path queries are design (M8).*
 
 1. **Seed** by dense similarity and sparse-code overlap within the caller's namespaces.
 2. **Spread** activation over `similar` and `coactive` edges for up to two hops, fan-out capped, with a 1/√degree penalty.
@@ -592,7 +597,7 @@ A feature may be used only if the relevant side declared it. Servers MUST suppor
 | `engram/forget` | `forget` | Delete memories, cascading to derived ones | ✅ M1 |
 | `engram/path` | | Best path between two memories | design |
 | `engram/attend` | `attend` | What matters now for a context | design |
-| `engram/feedback` | `feedback` | Report accepts, overrides and outcomes | design |
+| `engram/feedback` | `feedback` | Report accepts, overrides and outcomes | ✅ M4 |
 | `engram/subscribe`, `engram/unsubscribe` | resource subscription | Push notifications | design |
 | `engram/consolidate` | | Trigger a sleep cycle | design |
 | `engram/session/*` | | Checkpoint, resume, list, delegate | design |
@@ -645,7 +650,7 @@ A feature may be used only if the relevant side declared it. Servers MUST suppor
    "score": 0.71, "reason": "text match"}]}}
 ```
 
-Results reached through a pathway carry `"path": [seed, memory]` and a reason such as `"via coactive pathway from mem_…"`. `spread` is 0 or 1 hops in M2 (default 1). Without `asOf`, memories whose `validTo` has passed are excluded. `namespaces` defaults to everything the client may read; asking for one it can't read returns `-32004`.
+Results reached through a pathway carry `"path": [seed, memory]` and a reason such as `"via coactive pathway from mem_…"`. `spread` is 0 to 3 hops (default 2). Every result has a `confidence`; memories the user overrode are demoted and say so. Without `asOf`, memories whose `validTo` has passed are excluded. `namespaces` defaults to everything the client may read; asking for one it can't read returns `-32004`.
 
 #### `engram/get` and `engram/forget`
 
@@ -675,7 +680,7 @@ With `cascade`, memories derived only from the forgotten ones are removed too.
 
 `mode`: `detail`, `explore`, `focus`, `generalize`.
 
-#### `engram/feedback` *(design)*
+#### `engram/feedback`
 
 ```json
 {"jsonrpc": "2.0", "id": 7, "method": "engram/feedback", "params": {
@@ -685,7 +690,11 @@ With `cascade`, memories derived only from the forgotten ones are removed too.
   "correction": {"situation": "Artist upgrade", "choice": "Keep the artist's bookings on upgrade"}}}
 ```
 
-`outcome`: `accepted` or `overridden`. `objective` (`succeeded` or `failed`) is weighted above approval.
+```json
+{"jsonrpc": "2.0", "id": 7, "result": {"updated": 1, "direction": "weakened", "correctionId": "mem_5e6f7a8b9c0d1e2f"}}
+```
+
+`outcome`: `accepted` or `overridden`. `objective` (`succeeded` or `failed`) is weighted above approval: a failed outcome weakens even when approved. A `correction` is stored as a user decision linked by an `overrode` edge. Over the MCP profile the parameter is `memory_ids`.
 
 #### `engram/path` *(design)*
 
@@ -800,7 +809,7 @@ Each milestone is roughly one to two weekends and has a done-check.
 1. **M1 · Working server** ✅ Go MCP server, SQLite, pairing. *Done when* a fact told in one session is recalled in a fresh one.
 2. **M2 · Engram core** ✅ Embeddings, kNN and Hebbian edges, decay, pathway recall. *Done when* recall surfaces a memory reachable only through a pathway.
 3. **M3 · Bootstrapping** ✅ Git and Jira import, detected conventions and the Developer pack. *Done when* an agent applies a repo convention unprompted.
-4. **M4 · Learning and retrieval:** spreading activation, feedback, three-factor learning, ACT-R decay, lateral inhibition, confidence. *Done when* an override changes the next recall.
+4. **M4 · Learning and retrieval** ✅ Spreading activation, feedback, three-factor learning, ACT-R activation, lateral inhibition, confidence. *Done when* an override changes the next recall.
 
 **Phase 2 · Sleep and safety**
 5. **M5 · Sleep cycle v1** with sleep hours, verifier, morning report and rollback.

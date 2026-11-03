@@ -14,15 +14,6 @@ import (
 // run locally through the CLI. They bypass client grants, never create decisions,
 // and are keyed so that running the same import twice changes nothing.
 
-func init() {
-	migrations = append(migrations,
-		// 2 (M3): keys for idempotent imports.
-		`CREATE TABLE IF NOT EXISTS import_keys (
-		  key       TEXT PRIMARY KEY,
-		  memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE
-		);`)
-}
-
 // SystemMemory is a memory written by Engram's own tooling rather than an agent.
 type SystemMemory struct {
 	Key       string // stable identity for idempotence, e.g. "git-commit:<hash>"

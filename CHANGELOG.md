@@ -2,6 +2,25 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.4.0] - 2026-11-03
+
+Engine milestone M4: learning from feedback and better retrieval.
+
+### Added
+
+- `feedback` tool: report accepted or overridden memories, real outcomes (`succeeded`, `failed`) and corrections. A correction is stored as a user decision linked by an `overrode` edge, and overridden memories are demoted in later recalls.
+- Three-factor learning: recall gives co-activated pairs half a Hebbian step; confirming feedback gives the rest, contradicting feedback halves the pathway. Failed outcomes count as negative even when approved.
+- ACT-R base-level activation (frequency and recency) as a ranking prior alongside strength.
+- Multi-hop spreading activation: a beam of 10 over up to 3 hops with a 1/√degree fan penalty; results carry their full path.
+- Lateral inhibition: near-duplicate results collapse to the best one.
+- A confidence on every result; noise below a floor is dropped rather than padded.
+- Feedback events are stored as training data for later ranking models.
+
+### Changed
+
+- Recall's `spread` now accepts 0 to 3 hops (default 2).
+- Database migrations are defined in one ordered list.
+
 ## [0.3.0] - 2026-11-03
 
 Engine milestone M3: bootstrapping, so a new Engram starts out knowing something.

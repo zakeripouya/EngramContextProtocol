@@ -8,7 +8,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer that lets eve
 
 Agents connect through the Engram Context Protocol (ECP), a JSON-RPC 2.0 protocol modeled on MCP and compatible with it, so any MCP client can use Engram on day one. ECP adds what MCP lacks for awareness: an observe stream, salience queries, push notifications and feedback.
 
-**Implementation status:** milestones M1 (working server), M2 (embeddings, kNN wiring, Hebbian learning, pathway recall) and M3 (bootstrapping and the Developer pack) are implemented in this repository; everything else in this document is design. The protocol itself is specified in the [ECP v0 Specification](spec/ecp-v0.md).
+**Implementation status:** milestones M1 (working server), M2 (embeddings, kNN wiring, Hebbian learning, pathway recall) M3 (bootstrapping and the Developer pack) and M4 (feedback, three-factor learning, multi-hop retrieval) are implemented in this repository; everything else in this document is design. The protocol itself is specified in the [ECP v0 Specification](spec/ecp-v0.md).
 
 ## Problem and motivation
 
@@ -717,7 +717,7 @@ The design has grown well past a weekend project, so the work is phased: each ph
 1. **M1 · Working server.** ✅ Implemented. Go MCP server with `observe` and `recall`, SQLite store, client pairing through a CLI prompt, tested in the MCP Inspector and connected to Claude Code. *Done when* a fact told in one session is recalled in a fresh one.
 2. **M2 · Engram core.** ✅ Implemented. Local embeddings, kNN `similar` edges, Hebbian `coactive` updates, namespaces, provenance and bitemporal fields from the start (cheap now, costly to retrofit). *Done when* recall surfaces a memory reachable only through a pathway.
 3. **M3 · Bootstrapping.** ✅ Implemented. Import ink's git and Jira history into `team/ink` and a first Developer pack. *Done when* Claude Code applies a repo convention without being told.
-4. **M4 · Learning and retrieval.** Beam-search spreading activation, `engram/feedback`, three-factor learning, ACT-R decay, lateral inhibition and confidence scores. *Done when* an override changes the next recall and a baseline held-out prediction score exists.
+4. **M4 · Learning and retrieval.** ✅ Implemented. Beam-search spreading activation, `engram/feedback`, three-factor learning, ACT-R decay, lateral inhibition and confidence scores. *Done when* an override changes the next recall and a baseline held-out prediction score exists.
 
 **Phase 2 · Sleep and safety**
 

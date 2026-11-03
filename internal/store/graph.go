@@ -18,7 +18,8 @@ import (
 //   - On write, a memory is embedded and linked to its k nearest neighbors in
 //     the same namespace with "similar" edges (weight = cosine similarity).
 //   - On recall, memories returned together are co-activated: their "coactive"
-//     edge is strengthened with w ← w + η·(1 − w).
+//     edge gets half a Hebbian step, w ← w + ½η·(1 − w); feedback supplies the
+//     other half or takes it away (M4, three-factor learning).
 //   - Anti-echo: a pair counts once per client per hour, so an agent repeating
 //     the same lookup cannot reinforce its own results.
 //   - Decay: learned edges fade with w ← (1 − λ)·w and are pruned below a floor.
@@ -181,7 +182,7 @@ func (s *Store) coactivate(client string, ids []string) error {
 			if err != nil && err != sql.ErrNoRows {
 				return err
 			}
-			w += s.learn.Eta * (1 - w)
+			w += 0.5 * s.learn.Eta * (1 - w) // half a step; confirming feedback gives the rest (three-factor learning)
 			if _, err := tx.Exec(`INSERT INTO edges(src, dst, kind, weight, updated_at) VALUES (?,?,'coactive',?,?)
 				ON CONFLICT(src, dst, kind) DO UPDATE SET weight = excluded.weight, updated_at = excluded.updated_at`,
 				a, b, w, ts(now)); err != nil {
