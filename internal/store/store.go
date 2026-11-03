@@ -117,6 +117,29 @@ var migrations = []string{
 	  query     TEXT
 	);
 	CREATE INDEX IF NOT EXISTS feedback_memory ON feedback(memory_id);`,
+
+	// 4 (M5): settings, sleep runs and an undo log of every change a sleep cycle makes.
+	`CREATE TABLE IF NOT EXISTS settings (
+	  key   TEXT PRIMARY KEY,
+	  value TEXT NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS sleep_runs (
+	  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	  started_at  TEXT NOT NULL,
+	  finished_at TEXT,
+	  light       INTEGER NOT NULL DEFAULT 0,
+	  snapshot    TEXT,
+	  report      TEXT
+	);
+	CREATE TABLE IF NOT EXISTS sleep_changes (
+	  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+	  run_id    INTEGER NOT NULL,
+	  kind      TEXT NOT NULL,
+	  memory_id TEXT NOT NULL,
+	  other_id  TEXT,
+	  detail    TEXT,
+	  undone_at TEXT
+	);`,
 }
 
 // Accepted values (spec, "Data types").
@@ -709,13 +732,28 @@ func (s *Store) Get(client string, ids []string) ([]Memory, error) {
 
 // Recall returns the memories most related to the query that the client may read.
 func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
+	return s.recall(client, in, false)
+}
+
+// RecallSystem searches every namespace (or in.Namespaces) without grants and without
+// side effects: no activation counts, no Hebbian updates, no audit entry. The sleep
+// cycle uses it to test itself without changing what it is testing.
+func (s *Store) RecallSystem(in RecallInput) ([]Scored, error) {
+	return s.recall("engram-sleep", in, true)
+}
+
+func (s *Store) recall(client string, in RecallInput, system bool) ([]Scored, error) {
 	if in.K <= 0 {
 		in.K = 5
 	}
 	in.K = min(in.K, 50)
-	readable, all, err := s.readable(client)
-	if err != nil {
-		return nil, err
+	var readable []string
+	all := true
+	if !system {
+		var err error
+		if readable, all, err = s.readable(client); err != nil {
+			return nil, err
+		}
 	}
 	allowed := readable
 	if len(in.Namespaces) > 0 {
@@ -959,7 +997,7 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 			break
 		}
 	}
-	if !historical && len(results) > 0 {
+	if !historical && !system && len(results) > 0 {
 		stamp := ts(now)
 		ids := make([]string, len(results))
 		for i, r := range results {
@@ -972,8 +1010,10 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 			return nil, err
 		}
 	}
-	detail, _ := json.Marshal(map[string]any{"q": in.Query, "n": len(results)})
-	_ = audit(s.db, client, "recall", "", string(detail))
+	if !system {
+		detail, _ := json.Marshal(map[string]any{"q": in.Query, "n": len(results)})
+		_ = audit(s.db, client, "recall", "", string(detail))
+	}
 	return results, nil
 }
 

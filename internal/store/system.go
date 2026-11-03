@@ -101,3 +101,10 @@ func (s *Store) RemoveNamespace(namespace string) (int, error) {
 	_ = audit(s.db, "engram-cli", "remove-namespace", namespace, "")
 	return int(n), nil
 }
+
+// KeyExists reports whether a system memory with this key was ever created.
+func (s *Store) KeyExists(key string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT count(*) FROM import_keys WHERE key = ?`, key).Scan(&n)
+	return n > 0, err
+}

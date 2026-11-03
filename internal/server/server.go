@@ -20,7 +20,7 @@ import (
 )
 
 // Version is the server version reported to clients.
-var Version = "0.4.0"
+var Version = "0.5.0"
 
 const instructions = `Engram is the user's shared memory across AI agents (ECP ` + ecp.ProtocolVersion + `).
 Call "recall" before planning or deciding, to follow the user's past choices and project conventions.

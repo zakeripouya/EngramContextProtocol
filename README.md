@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) and M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) and M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
 
 ---
 
@@ -88,6 +88,16 @@ engram reembed                 # embed anything stored before the server was up
 
 Vectors from different models are never compared; run `engram reembed` after switching models.
 
+### Sleep cycle
+
+```bash
+engram sleep hours 01:00-07:00 --tz America/New_York
+engram sleep schedule      # prints a cron or launchd entry; add it once
+ollama pull llama3.2       # optional: enables distillation and verification
+```
+
+The scheduler calls `engram sleep run --if-due` every 15 minutes; it only works inside your sleep hours, after 20 minutes without agent activity, once a night. Configure the chat model with `ENGRAM_LLM`, `ENGRAM_LLM_URL`, `ENGRAM_LLM_MODEL` and `ENGRAM_LLM_KEY` (same pattern as embeddings). Read the result each morning with `engram sleep report`.
+
 ### CLI
 
 | Command | What it does |
@@ -103,6 +113,12 @@ Vectors from different models are never compared; run `engram reembed` after swi
 | `engram import jira FILE [--ns NS]` | Import a saved Jira search export (JSON) |
 | `engram import json FILE [--ns NS]` | Import generic records |
 | `engram pack list` / `install NAME` / `remove NAME` | Manage pathway packs |
+| `engram sleep hours 01:00-07:00 --tz America/New_York` | Set your sleep hours |
+| `engram sleep run [--light] [--if-due]` | Run a consolidation cycle now, or only when it is due |
+| `engram sleep report [--json]` | Show the latest morning report and its undoable changes |
+| `engram sleep undo ID` | Undo one change from a cycle |
+| `engram sleep schedule` | Print the cron or launchd line that runs cycles automatically |
+| `engram snapshot list` / `restore FILE` | List snapshots, or roll the database back to one |
 | `engram setup claude-code` / `claude-desktop` | Print connection instructions |
 | `engram version` | Print the engine and protocol versions |
 
@@ -138,7 +154,10 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | ACT-R base-level activation from frequency and recency | ✅ M4 |
 | Lateral inhibition of near-duplicate results | ✅ M4 |
 | Confidence on every result; overridden memories demoted | ✅ M4 |
-| Sleep cycle, verifier, morning report | design (M5) |
+| Sleep cycle: snapshot, decay, homeostatic downscaling, dedupe, archive faded memories | ✅ M5 |
+| Hub detection and LLM distillation verified by a separate call | ✅ M5 |
+| Recall self-test on user decisions; morning report; per-change undo; snapshot restore | ✅ M5 |
+| Sleep hours with idle detection and once-a-night scheduling | ✅ M5 |
 | Session handoff, second agent | design (M7) |
 | Triggers, push notifications, `attend` | design (M8) |
 | Permission assist (shadow mode) | design (M9) |
@@ -266,7 +285,7 @@ Retrieval modes preset these parameters by function: **Detail** (trust specific 
 
 ## Sleep: consolidation and dreaming
 
-*Design (M5).* During your inactive hours, Engram reorganizes itself.
+*Implemented in M5 with classical methods in Go: union-find hubs instead of HDBSCAN and Leiden, and a recall self-test of decisions. The ML models in the table below and generated tests (M6) are design.* During your inactive hours, Engram reorganizes itself.
 
 1. **Decay and downscale** all weights; prune below a floor.
 2. **Deduplicate** near-identical episodes (MinHash and embeddings).
@@ -812,7 +831,7 @@ Each milestone is roughly one to two weekends and has a done-check.
 4. **M4 · Learning and retrieval** ✅ Spreading activation, feedback, three-factor learning, ACT-R activation, lateral inhibition, confidence. *Done when* an override changes the next recall.
 
 **Phase 2 · Sleep and safety**
-5. **M5 · Sleep cycle v1** with sleep hours, verifier, morning report and rollback.
+5. **M5 · Sleep cycle v1** ✅ Sleep hours, verifier, morning report, undo and rollback.
 6. **M6 · Testing harness:** bounds, drift detection, generated and mutation tests.
 7. **M7 · Second agent and sessions:** a task started in Claude Code finishes in Codex without re-explaining.
 
@@ -838,6 +857,8 @@ internal/store/      SQLite store, grants, time validity, ranking, graph learnin
 internal/embed/      embedding providers (OpenAI-compatible, offline hashing)
 internal/text/       tokenizer shared by ranking and hashing
 internal/bootstrap/  git, Jira and JSON importers; pathway packs (built-ins in packs/)
+internal/sleep/      the sleep cycle and sleep hours
+internal/llm/        chat client for distillation and verification
 internal/server/     MCP tools (the ECP compatibility profile)
 spec/schema.ts       normative ECP schema
 spec/schema.json     generated JSON Schema

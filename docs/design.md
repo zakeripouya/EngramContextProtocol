@@ -8,7 +8,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer that lets eve
 
 Agents connect through the Engram Context Protocol (ECP), a JSON-RPC 2.0 protocol modeled on MCP and compatible with it, so any MCP client can use Engram on day one. ECP adds what MCP lacks for awareness: an observe stream, salience queries, push notifications and feedback.
 
-**Implementation status:** milestones M1 (working server), M2 (embeddings, kNN wiring, Hebbian learning, pathway recall) M3 (bootstrapping and the Developer pack) and M4 (feedback, three-factor learning, multi-hop retrieval) are implemented in this repository; everything else in this document is design. The protocol itself is specified in the [ECP v0 Specification](spec/ecp-v0.md).
+**Implementation status:** milestones M1 (working server), M2 (embeddings, kNN wiring, Hebbian learning, pathway recall) M3 (bootstrapping and the Developer pack) M4 (feedback, three-factor learning, multi-hop retrieval) and M5 (the sleep cycle) are implemented in this repository; everything else in this document is design. The protocol itself is specified in the [ECP v0 Specification](spec/ecp-v0.md).
 
 ## Problem and motivation
 
@@ -721,7 +721,7 @@ The design has grown well past a weekend project, so the work is phased: each ph
 
 **Phase 2 · Sleep and safety**
 
-5. **M5 · Sleep cycle v1.** Sleep-hours setup, classical ML jobs (dedupe, clustering, downscaling), distillation with the verifier, morning report, snapshots and rollback. *Done when* a week of nightly cycles passes with all bounds in range.
+5. **M5 · Sleep cycle v1.** ✅ Implemented. Sleep-hours setup, classical ML jobs (dedupe, clustering, downscaling), distillation with the verifier, morning report, snapshots and rollback. *Done when* a week of nightly cycles passes with all bounds in range.
 6. **M6 · Testing harness.** Software tests in CI, neuroscience bounds, drift detection, programmatic and mutation tests. *Done when* an injected fault (a runaway hub or a poisoned memory) is caught automatically.
 7. **M7 · Second agent and sessions.** Codex shares the graph; session checkpoint and resume. *Done when* a task started in Claude Code is finished in Codex without re-explaining.
 

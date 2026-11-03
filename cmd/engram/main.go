@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -27,7 +28,9 @@ import (
 	"github.com/zakeripouya/EngramContextProtocol/internal/bootstrap"
 	"github.com/zakeripouya/EngramContextProtocol/internal/ecp"
 	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
+	"github.com/zakeripouya/EngramContextProtocol/internal/llm"
 	"github.com/zakeripouya/EngramContextProtocol/internal/server"
+	"github.com/zakeripouya/EngramContextProtocol/internal/sleep"
 	"github.com/zakeripouya/EngramContextProtocol/internal/store"
 )
 
@@ -48,6 +51,13 @@ Usage:
   engram pack list                        list built-in pathway packs
   engram pack install NAME|FILE           install a pack into pack/<name>
   engram pack remove NAME                 uninstall a pack
+  engram sleep hours 01:00-07:00 [--tz Zone]
+                                          set your sleep hours (the cycle only runs inside them)
+  engram sleep run [--light] [--if-due]   run a consolidation cycle now, or only if it is due
+  engram sleep report [--json]            show the latest morning report and its undoable changes
+  engram sleep undo CHANGE_ID             undo one change from a cycle
+  engram sleep schedule                   print the cron or launchd line that runs the cycle
+  engram snapshot list | restore FILE     list snapshots, or restore one (stop agents first)
   engram setup claude-code|claude-desktop print connection instructions
   engram version                          print the version
 
@@ -55,6 +65,8 @@ Database: $ENGRAM_DB, or ~/.engram/engram.db
 Embeddings: $ENGRAM_EMBED = auto (default) | openai | hash | off
             $ENGRAM_EMBED_URL (default http://localhost:11434, Ollama), $ENGRAM_EMBED_MODEL
             (default nomic-embed-text), $ENGRAM_EMBED_KEY for hosted providers
+Chat model for the sleep cycle: $ENGRAM_LLM = auto (default) | openai | off,
+            $ENGRAM_LLM_URL (default http://localhost:11434), $ENGRAM_LLM_MODEL (default llama3.2), $ENGRAM_LLM_KEY
 `
 
 func main() {
@@ -117,6 +129,8 @@ func run(args []string) error {
 		return nil
 	case "setup":
 		return setup(rest)
+	case "snapshot":
+		return runSnapshot(rest)
 	}
 
 	st, err := store.Open(dbPath())
@@ -124,7 +138,7 @@ func run(args []string) error {
 		return err
 	}
 	defer st.Close()
-	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "pack" {
+	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "pack" || cmd == "sleep" {
 		e, note := embed.New(context.Background(), embed.FromEnv())
 		st.SetEmbedder(e)
 		fmt.Fprintln(os.Stderr, "engram:", note) // stderr: stdout carries the MCP protocol
@@ -233,6 +247,9 @@ func run(args []string) error {
 
 	case "pack":
 		return runPack(st, rest)
+
+	case "sleep":
+		return runSleep(st, rest)
 
 	case "decay":
 		r, err := st.Decay()
@@ -357,4 +374,211 @@ func runPack(st *store.Store, args []string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown pack command %q", args[0])
+}
+
+func snapshotDir() string { return filepath.Join(filepath.Dir(dbPath()), "snapshots") }
+
+func runSleep(st *store.Store, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: engram sleep hours|run|report|undo|schedule")
+	}
+	switch args[0] {
+	case "hours":
+		fs := flag.NewFlagSet("hours", flag.ContinueOnError)
+		tz := fs.String("tz", "Local", "IANA time zone, e.g. America/New_York")
+		if len(args) < 2 {
+			if h, ok, err := sleep.LoadHours(st); err != nil {
+				return err
+			} else if ok {
+				fmt.Println("Sleep hours:", h)
+				return nil
+			}
+			return fmt.Errorf("usage: engram sleep hours 01:00-07:00 [--tz America/New_York]")
+		}
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		h, err := sleep.ParseHours(args[1], *tz)
+		if err != nil {
+			return err
+		}
+		if err := sleep.SaveHours(st, h); err != nil {
+			return err
+		}
+		fmt.Println("Sleep hours set to", h)
+		return nil
+
+	case "run":
+		fs := flag.NewFlagSet("run", flag.ContinueOnError)
+		light := fs.Bool("light", false, "decay, downscale and dedupe only")
+		ifDue := fs.Bool("if-due", false, "run only inside sleep hours, when agents are idle, once a night")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *ifDue {
+			ok, why, err := sleep.Due(st, time.Now())
+			if err != nil {
+				return err
+			}
+			if !ok {
+				fmt.Println("Not running:", why)
+				return nil
+			}
+		}
+		var chat llm.Chat
+		if !*light {
+			c, note := llm.New(context.Background(), llm.FromEnv())
+			fmt.Fprintln(os.Stderr, "engram:", note)
+			chat = c
+		}
+		rep, err := sleep.Run(context.Background(), st, sleep.Options{Light: *light, SnapshotDir: snapshotDir(), Chat: chat})
+		if err != nil {
+			return err
+		}
+		printReport(rep)
+		return nil
+
+	case "report":
+		fs := flag.NewFlagSet("report", flag.ContinueOnError)
+		asJSON := fs.Bool("json", false, "print the raw report")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		runs, err := st.Runs(1)
+		if err != nil {
+			return err
+		}
+		if len(runs) == 0 || runs[0].Report == nil {
+			fmt.Println("No sleep cycle has run yet. Try: engram sleep run")
+			return nil
+		}
+		if *asJSON {
+			fmt.Println(string(runs[0].Report))
+			return nil
+		}
+		var rep sleep.Report
+		if err := json.Unmarshal(runs[0].Report, &rep); err != nil {
+			return err
+		}
+		printReport(rep)
+		changes, err := st.Changes(rep.RunID)
+		if err != nil {
+			return err
+		}
+		if len(changes) > 0 {
+			fmt.Println("\nChanges (undo with: engram sleep undo ID)")
+			for _, c := range changes {
+				state := ""
+				if c.UndoneAt != "" {
+					state = " (undone)"
+				}
+				fmt.Printf("  %4d  %-9s %s%s\n", c.ID, c.Kind, c.Detail, state)
+			}
+		}
+		return nil
+
+	case "undo":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: engram sleep undo CHANGE_ID")
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return fmt.Errorf("change ids are numbers; see engram sleep report")
+		}
+		c, err := st.UndoChange(id)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Undid %s change %d: %s\n", c.Kind, c.ID, c.MemoryID)
+		return nil
+
+	case "schedule":
+		exe, _ := os.Executable()
+		fmt.Println("Run the cycle every 15 minutes; it only does work inside your sleep hours, when agents are idle, once a night.")
+		fmt.Println("\ncron (Linux, or macOS with cron):")
+		fmt.Printf("  */15 * * * * %s sleep run --if-due >> %s 2>&1\n", exe, filepath.Join(filepath.Dir(dbPath()), "sleep.log"))
+		fmt.Println("\nlaunchd (macOS): save as ~/Library/LaunchAgents/dev.engram.sleep.plist, then launchctl load it:")
+		fmt.Printf(`  <?xml version="1.0" encoding="UTF-8"?>
+  <plist version="1.0"><dict>
+    <key>Label</key><string>dev.engram.sleep</string>
+    <key>ProgramArguments</key><array><string>%s</string><string>sleep</string><string>run</string><string>--if-due</string></array>
+    <key>StartInterval</key><integer>900</integer>
+  </dict></plist>
+`, exe)
+		return nil
+	}
+	return fmt.Errorf("unknown sleep command %q", args[0])
+}
+
+func printReport(r sleep.Report) {
+	kind := "Full"
+	if r.Light {
+		kind = "Light"
+	}
+	fmt.Printf("%s sleep cycle %d, %s\n", kind, r.RunID, r.StartedAt)
+	fmt.Printf("  pathways decayed %d, pruned %d; memories downscaled %d\n", r.Decayed, r.Pruned, r.Downscaled)
+	fmt.Printf("  merged %d near-duplicates, archived %d faded memories\n", r.Merged, r.Archived)
+	if !r.Light {
+		fmt.Printf("  hubs found %d\n", r.Hubs)
+		for _, d := range r.Distilled {
+			mark := "kept"
+			if d.MemoryID == "" {
+				mark = "discarded"
+			}
+			fmt.Printf("  distilled (%s, %s): %s\n", d.Verdict, mark, d.Fact)
+		}
+	}
+	if r.SelfTest.Tested > 0 {
+		fmt.Printf("  self-test: recall found %d of %d decisions from their situations\n", r.SelfTest.Found, r.SelfTest.Tested)
+		for _, m := range r.SelfTest.Misses {
+			fmt.Println("    missed:", m)
+		}
+	}
+	for _, n := range r.Notes {
+		fmt.Println("  note:", n)
+	}
+	if r.Snapshot != "" {
+		fmt.Println("  snapshot:", r.Snapshot)
+	}
+}
+
+func runSnapshot(args []string) error {
+	if len(args) == 0 || args[0] == "list" {
+		files, _ := filepath.Glob(filepath.Join(snapshotDir(), "engram-*.db"))
+		if len(files) == 0 {
+			fmt.Println("No snapshots yet; each sleep cycle makes one.")
+		}
+		for _, f := range files {
+			fmt.Println(f)
+		}
+		return nil
+	}
+	if args[0] != "restore" || len(args) != 2 {
+		return fmt.Errorf("usage: engram snapshot list | restore FILE")
+	}
+	src := args[1]
+	if _, err := os.Stat(src); err != nil {
+		return err
+	}
+	db := dbPath()
+	backup := db + ".before-restore"
+	if err := copyFile(db, backup); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		_ = os.Remove(db + suffix)
+	}
+	if err := copyFile(src, db); err != nil {
+		return err
+	}
+	fmt.Printf("Restored %s\nThe previous database was kept at %s\n", src, backup)
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, b, 0o600)
 }

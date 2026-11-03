@@ -2,6 +2,19 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.5.0] - 2026-11-03
+
+Engine milestone M5: the sleep cycle.
+
+### Added
+
+- `engram sleep run`: snapshot, decay, homeostatic downscaling of unused memories, near-duplicate merging, archiving of faded memories, hub detection, LLM distillation verified by a separate call, a recall self-test of user decisions, and a stored morning report.
+- Distilled facts link to every source with `derived` edges; unsupported claims are reported and discarded; a hub is never distilled twice, and distilled facts never join new hubs.
+- `engram sleep hours` with `--if-due` scheduling: inside the window, after 20 minutes of agent quiet, once a night. `engram sleep schedule` prints cron and launchd entries.
+- `engram sleep report` and `engram sleep undo`: every merge, archive and distilled fact is logged and reversible. Nothing is deleted outright.
+- Snapshots before each cycle (newest 7 kept); `engram snapshot list | restore`.
+- Chat client for any OpenAI-compatible `/v1/chat/completions` server (`ENGRAM_LLM*`, Ollama `llama3.2` by default); language steps are skipped, never faked, when no model answers.
+
 ## [0.4.0] - 2026-11-03
 
 Engine milestone M4: learning from feedback and better retrieval.
