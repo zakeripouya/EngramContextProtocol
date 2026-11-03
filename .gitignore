@@ -1,0 +1,18 @@
+# Binaries
+/engram
+/dist/
+*.exe
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+
+# Local-only Go workspace (used to build in restricted environments)
+go.work
+go.work.sum
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/

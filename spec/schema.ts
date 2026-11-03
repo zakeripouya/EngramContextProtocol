@@ -1,0 +1,343 @@
+/**
+ * Engram Context Protocol (ECP) — normative schema, protocol version 2026-11-01 (draft v0).
+ *
+ * This file is the source of truth for the wire format. The prose specification is
+ * docs/spec/ecp-v0.md. A JSON Schema is generated from this file (see spec/README.md).
+ */
+
+export const PROTOCOL_VERSION = "2026-11-01";
+
+/* ------------------------------------------------------------------ */
+/* JSON-RPC 2.0 envelope                                              */
+/* ------------------------------------------------------------------ */
+
+export type RequestId = string | number;
+
+export interface JSONRPCRequest<M extends string = string, P = unknown> {
+  jsonrpc: "2.0";
+  id: RequestId;
+  method: M;
+  params?: P;
+}
+
+export interface JSONRPCNotification<M extends string = string, P = unknown> {
+  jsonrpc: "2.0";
+  method: M;
+  params?: P;
+}
+
+export interface JSONRPCResult<R = unknown> {
+  jsonrpc: "2.0";
+  id: RequestId;
+  result: R;
+}
+
+export interface JSONRPCError {
+  jsonrpc: "2.0";
+  id: RequestId | null;
+  error: { code: ErrorCode | number; message: string; data?: unknown };
+}
+
+/* ------------------------------------------------------------------ */
+/* Core data types                                                    */
+/* ------------------------------------------------------------------ */
+
+export type NodeKind =
+  | "episode"
+  | "concept"
+  | "decision"
+  | "suggestion"
+  | "fact"
+  | "trait"
+  | "procedure";
+
+export type EdgeKind =
+  | "similar"
+  | "coactive"
+  | "about"
+  | "derived"
+  | "supersedes"
+  | "conflicts"
+  | "accepted"
+  | "overrode"
+  | "cross";
+
+export type Scope = "private" | "team" | "public";
+
+export type Author = "user" | "agent" | "system";
+
+export interface Provenance {
+  agent: string; // e.g. "claude", "codex"
+  client: string; // clientInfo.name of the writer, set by the server
+  service?: string; // e.g. "github", "gmail"
+  sessionId?: string;
+  author: Author;
+  at: string; // ISO 8601, UTC
+}
+
+export interface Memory {
+  id: string;
+  kind: NodeKind;
+  content: string;
+  tags?: string[];
+  scope: Scope;
+  namespace: string; // e.g. "me", "team/ink", "pack/developer", "ext/stripe-api"
+  strength: number; // 0..1
+  confidence?: number; // 0..1, for traits and distilled facts
+  provenance: Provenance;
+  createdAt: string; // when Engram learned it (recorded at)
+  validFrom?: string; // when it became true in the world
+  validTo?: string; // when it stopped being true; absent = still true
+  lastActivatedAt?: string;
+}
+
+export interface Decision {
+  situation: string;
+  options?: string[];
+  choice: string;
+  rationale?: string;
+}
+
+export interface Edge {
+  from: string;
+  to: string;
+  kind: EdgeKind;
+  weight: number; // 0..1
+}
+
+export interface ScoredMemory {
+  memory: Memory;
+  score: number;
+  confidence?: number; // calibrated; low values mean "don't know"
+  path?: string[]; // node ids from seed to this memory
+  reason?: string; // human-readable explanation
+}
+
+/* ------------------------------------------------------------------ */
+/* Lifecycle                                                          */
+/* ------------------------------------------------------------------ */
+
+export interface ClientInfo {
+  name: string;
+  version: string;
+  agent?: string;
+}
+
+export interface ServerInfo {
+  name: string;
+  version: string;
+}
+
+export interface ClientCapabilities {
+  notifications?: { relevant?: boolean; conflict?: boolean };
+  [extension: `x_${string}`]: unknown;
+}
+
+export interface ServerCapabilities {
+  observe?: { kinds?: NodeKind[] };
+  recall?: { spreadingActivation?: boolean; maxK?: number };
+  attend?: Record<string, never>;
+  feedback?: Record<string, never>;
+  subscribe?: { topics?: boolean };
+  consolidate?: Record<string, never>;
+  forget?: { cascade?: boolean };
+  sessions?: Record<string, never>;
+  [extension: `x_${string}`]: unknown;
+}
+
+export interface InitializeParams {
+  protocolVersion: string;
+  supportedVersions?: string[];
+  capabilities: ClientCapabilities;
+  clientInfo: ClientInfo;
+}
+
+export interface InitializeResult {
+  protocolVersion: string;
+  capabilities: ServerCapabilities;
+  serverInfo: ServerInfo;
+}
+
+/* ------------------------------------------------------------------ */
+/* Methods                                                            */
+/* ------------------------------------------------------------------ */
+
+export interface ObserveParams {
+  kind: "episode" | "decision" | "suggestion" | "fact";
+  content: string;
+  decision?: Decision; // REQUIRED when kind = "decision"
+  tags?: string[];
+  scope?: Scope; // default "private"
+  namespace?: string; // default "me"
+  service?: string;
+  sessionId?: string;
+  author?: Author; // default "agent"; a decision requires "user"
+  validFrom?: string;
+}
+export interface ObserveResult {
+  id: string;
+  linked: number; // edges created
+}
+
+export interface RecallParams {
+  query: string;
+  k?: number; // default 5
+  kinds?: NodeKind[];
+  tags?: string[];
+  namespaces?: string[]; // default: personal and team, then linked packs
+  spread?: number; // hops of spreading activation, default 2
+  asOf?: string; // answer as of this time (bitemporal query)
+  includePaths?: boolean;
+}
+export interface RecallResult {
+  memories: ScoredMemory[];
+}
+
+export interface GetParams {
+  ids: string[];
+}
+export interface GetResult {
+  memories: Memory[];
+}
+
+export interface PathParams {
+  from: string;
+  to: string;
+  rule?: "maximin" | "most_probable"; // default "maximin"
+}
+export interface PathResult {
+  path: string[];
+  weakestLink?: Edge;
+}
+
+export interface AttendParams {
+  context: string;
+  goals?: string[];
+  k?: number;
+  mode?: "detail" | "explore" | "focus" | "generalize";
+}
+export interface AttendResult {
+  memories: ScoredMemory[];
+  conflicts: { a: string; b: string; summary: string }[];
+}
+
+export interface FeedbackParams {
+  memoryIds: string[];
+  outcome: "accepted" | "overridden";
+  correction?: Decision; // stored as a new decision when overridden
+  objective?: "succeeded" | "failed"; // real-world outcome, weighted above approval
+}
+
+export interface ForgetParams {
+  ids: string[];
+  cascade?: boolean; // also remove nodes derived only from these
+}
+export interface ForgetResult {
+  removed: number;
+}
+
+export interface SubscribeParams {
+  context: string;
+  tags?: string[];
+  threshold?: number; // minimum salience 0..1, default 0.6
+}
+export interface SubscribeResult {
+  subscriptionId: string;
+}
+
+export interface UnsubscribeParams {
+  subscriptionId: string;
+}
+
+export interface ConsolidateParams {
+  namespace?: string;
+  light?: boolean; // decay and dedupe only
+}
+
+/* Sessions and handoff */
+
+export interface Checkpoint {
+  sessionId: string;
+  goal: string;
+  plan: string[];
+  done: string[];
+  next?: string;
+  openQuestions?: string[];
+  files?: string[];
+  environment?: { repo?: string; tools?: string[] };
+  namespace: string;
+  updatedAt: string;
+}
+export interface ResumeParams {
+  sessionId: string;
+}
+export interface ResumeResult {
+  checkpoint: Checkpoint;
+  missing: string[];
+}
+export interface SessionListParams {
+  status?: "open" | "done";
+}
+export interface DelegateParams {
+  sessionId: string;
+  subtask: string;
+  toAgent?: string;
+}
+
+export type ECPRequest =
+  | JSONRPCRequest<"initialize", InitializeParams>
+  | JSONRPCRequest<"engram/observe", ObserveParams>
+  | JSONRPCRequest<"engram/recall", RecallParams>
+  | JSONRPCRequest<"engram/get", GetParams>
+  | JSONRPCRequest<"engram/path", PathParams>
+  | JSONRPCRequest<"engram/attend", AttendParams>
+  | JSONRPCRequest<"engram/feedback", FeedbackParams>
+  | JSONRPCRequest<"engram/forget", ForgetParams>
+  | JSONRPCRequest<"engram/subscribe", SubscribeParams>
+  | JSONRPCRequest<"engram/unsubscribe", UnsubscribeParams>
+  | JSONRPCRequest<"engram/consolidate", ConsolidateParams>
+  | JSONRPCRequest<"engram/session/checkpoint", Checkpoint>
+  | JSONRPCRequest<"engram/session/resume", ResumeParams>
+  | JSONRPCRequest<"engram/session/list", SessionListParams>
+  | JSONRPCRequest<"engram/session/delegate", DelegateParams>;
+
+/* ------------------------------------------------------------------ */
+/* Notifications                                                      */
+/* ------------------------------------------------------------------ */
+
+export type InitializedNotification = JSONRPCNotification<"notifications/initialized">;
+
+export type RelevantNotification = JSONRPCNotification<
+  "notifications/engram/relevant",
+  { subscriptionId: string; memories: ScoredMemory[]; reason: string }
+>;
+
+export type ConflictNotification = JSONRPCNotification<
+  "notifications/engram/conflict",
+  { a: Memory; b: Memory; summary: string }
+>;
+
+export type ConsolidatedNotification = JSONRPCNotification<
+  "notifications/engram/consolidated",
+  { created: number; pruned: number; traits: string[] }
+>;
+
+/* ------------------------------------------------------------------ */
+/* Errors                                                             */
+/* ------------------------------------------------------------------ */
+
+export enum ErrorCode {
+  ParseError = -32700,
+  InvalidRequest = -32600,
+  MethodNotFound = -32601,
+  InvalidParams = -32602,
+  InternalError = -32603,
+  NotInitialized = -32001,
+  UnsupportedVersion = -32002,
+  Unauthorized = -32003,
+  ScopeDenied = -32004,
+  MemoryNotFound = -32005,
+  InvalidProvenance = -32006,
+  RateLimited = -32007,
+  ContentRejected = -32008,
+}
