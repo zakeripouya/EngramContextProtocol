@@ -64,6 +64,16 @@ Usage:
                                           import a repository's history, file coupling and conventions
   engram import jira FILE [--ns NS]       import a saved Jira search export (JSON)
   engram import json FILE [--ns NS]       import generic records [{"kind","content","tags","validFrom"}]
+  engram eval [--k 5] [--ablations] [--model ID]
+                                          measure recall on held-out feedback: Recall@k, MRR, NDCG, calibration,
+                                          baselines and ablations with 95%% bootstrap intervals
+  engram eval permits | runs | show ID | compare A B | export FILE
+  engram bench locomo|longmemeval FILE [--qa] [--ablations]
+                                          public long-term-memory benchmarks, with an LLM judge for --qa
+  engram model list | train ranker|calibrator|permit [--activate] | activate ID | off KIND
+                                          learned models, activated only when they beat the hand-set rules
+  engram experiment start NAME --variant CONFIG [--share 0.2] | status | stop
+                                          an online A/B test of a recall configuration
   engram pack list | search [TERM]        installed, built-in and registry packs
   engram pack install NAME[@V]|FILE       install a built-in, registry or local pack (signatures checked)
   engram pack update [NAME] | remove NAME update from registries (learned weights kept), or uninstall
@@ -185,7 +195,7 @@ func run(args []string) error {
 		return err
 	}
 	defer st.Close()
-	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "absorb" || cmd == "pack" || cmd == "sleep" || cmd == "selftest" || cmd == "listen" || cmd == "job" {
+	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "absorb" || cmd == "eval" || cmd == "bench" || cmd == "model" || cmd == "experiment" || cmd == "pack" || cmd == "sleep" || cmd == "selftest" || cmd == "listen" || cmd == "job" {
 		e, note := embed.New(context.Background(), embed.FromEnv())
 		st.SetEmbedder(e)
 		fmt.Fprintln(os.Stderr, "engram:", note) // stderr: stdout carries the MCP protocol
@@ -330,6 +340,18 @@ func run(args []string) error {
 
 	case "absorb":
 		return runAbsorb(st, rest)
+
+	case "eval":
+		return runEval(st, rest)
+
+	case "bench":
+		return runBench(st, rest)
+
+	case "model":
+		return runModel(st, rest)
+
+	case "experiment":
+		return runExperiment(st, rest)
 
 	case "pack":
 		return runPack(st, rest)

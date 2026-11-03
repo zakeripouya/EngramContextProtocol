@@ -14,7 +14,9 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"time"
 
+	"github.com/zakeripouya/EngramContextProtocol/internal/eval"
 	"github.com/zakeripouya/EngramContextProtocol/internal/store"
 )
 
@@ -88,6 +90,32 @@ func share(vals []float64, pred func(float64) bool) float64 {
 	return float64(n) / float64(len(vals))
 }
 
+// KSHist is the two-sample Kolmogorov–Smirnov statistic between two binned
+// distributions (the largest gap between their cumulative shares) and its
+// p-value for sample sizes n1 and n2. Binning makes it slightly conservative.
+func KSHist(a, b []float64, n1, n2 int) (d, p float64) {
+	ca, cb := 0.0, 0.0
+	for i := range a {
+		ca += a[i]
+		if i < len(b) {
+			cb += b[i]
+		}
+		d = math.Max(d, math.Abs(ca-cb))
+	}
+	return d, eval.KSProb(d, n1, n2)
+}
+
+func meanEdges(h []Metrics) int {
+	if len(h) == 0 {
+		return 0
+	}
+	s := 0
+	for _, m := range h {
+		s += m.CoactiveEdges
+	}
+	return s / len(h)
+}
+
 // PSI is the population stability index between two histograms; above 0.25 is a large shift.
 func PSI(expected, actual []float64) float64 {
 	const eps = 1e-4
@@ -132,7 +160,6 @@ func Evaluate(m Metrics, history []Metrics) Report {
 	r := Report{Metrics: m, Unknown: []string{
 		"sparse-code density (sparse codes are not built yet)",
 		"forgetting-curve fit (needs months of activation history)",
-		"confidence calibration (needs feedback with confidence logged; see M9 shadow data)",
 		"trait stability (traits are not distilled yet)",
 	}}
 	add := func(list *[]Bound, b Bound) { *list = append(*list, b) }
@@ -184,6 +211,7 @@ func Evaluate(m Metrics, history []Metrics) Report {
 			}
 		}
 		psi := PSI(base, m.WeightHist)
+		ksD, ksP := KSHist(base, m.WeightHist, meanEdges(history[:n]), m.CoactiveEdges)
 		d := Bound{Name: "Pathway weight drift (PSI vs last week)", Value: psi, Limit: "under 0.10; over 0.25 is severe", Status: OK}
 		if psi > 0.25 {
 			d.Status, d.Detail = Breach, "the weight distribution shifted sharply; consider restoring last night's snapshot"
@@ -191,20 +219,58 @@ func Evaluate(m Metrics, history []Metrics) Report {
 			d.Status, d.Detail = Warn, "the weight distribution is shifting"
 		}
 		add(&r.Drift, d)
+		ks := Bound{Name: "Pathway weight drift (KS test vs last week)", Value: ksD,
+			Limit: "p ≥ 0.01, or a gap under 0.10", Status: OK, Detail: fmt.Sprintf("D = %.3f, p = %.3g", ksD, ksP)}
+		if ksP < 0.01 && ksD >= 0.2 {
+			ks.Status, ks.Detail = Breach, ks.Detail+": a large, significant shift in the distribution"
+		} else if ksP < 0.01 && ksD >= 0.1 {
+			ks.Status, ks.Detail = Warn, ks.Detail+": a significant shift in the distribution"
+		}
+		add(&r.Drift, ks)
 	} else {
 		r.Unknown = append(r.Unknown, "drift (needs 3 nights of history and 20 learned pathways)")
 	}
 
-	r.Worst = OK
-	for _, b := range append(append([]Bound{}, r.Bounds...), r.Drift...) {
-		if b.Status == Breach {
-			r.Worst = Breach
-		} else if b.Status == Warn && r.Worst == OK {
-			r.Worst = Warn
-		}
-	}
+	r.Worst = worst(r)
 	sort.Strings(r.Unknown)
 	return r
+}
+
+func worst(r Report) string {
+	w := OK
+	for _, b := range append(append([]Bound{}, r.Bounds...), r.Drift...) {
+		if b.Status == Breach {
+			w = Breach
+		} else if b.Status == Warn && w == OK {
+			w = Warn
+		}
+	}
+	return w
+}
+
+// calibrationBound checks recall's confidence against the last 30 days of feedback.
+func calibrationBound(st *store.Store) Bound {
+	b := Bound{Name: "Confidence calibration (ECE, last 30 days)", Limit: "under 0.10; over 0.20 is poor", Status: OK}
+	qs, err := st.RecallLog(store.Now().Add(-30*24*time.Hour), time.Time{}, true)
+	if err != nil {
+		b.Status, b.Detail = Unknown, err.Error()
+		return b
+	}
+	p, y := eval.CalibrationPairs(qs)
+	if len(p) < 50 {
+		b.Status, b.Detail = Unknown, fmt.Sprintf("needs 50 judged results; %d so far", len(p))
+		return b
+	}
+	c := eval.Calibrate(p, y, 10)
+	b.Value = c.ECE
+	b.Detail = fmt.Sprintf("%d judged results, Brier %.3f; engram model train calibrator can fix it", c.N, c.Brier)
+	switch {
+	case c.ECE > 0.20:
+		b.Status = Breach
+	case c.ECE > 0.10:
+		b.Status = Warn
+	}
+	return b
 }
 
 // Check measures, evaluates against stored history and records tonight's metrics.
@@ -225,6 +291,8 @@ func Check(st *store.Store, decisionRecall float64, save bool) (Report, error) {
 		}
 	}
 	rep := Evaluate(m, history)
+	rep.Bounds = append(rep.Bounds, calibrationBound(st))
+	rep.Worst = worst(rep)
 	if save {
 		if err := st.SaveHealth(m); err != nil {
 			return rep, err

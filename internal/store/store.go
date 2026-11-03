@@ -26,6 +26,7 @@ import (
 
 	"github.com/zakeripouya/EngramContextProtocol/internal/ecp"
 	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
+	"github.com/zakeripouya/EngramContextProtocol/internal/model"
 	"github.com/zakeripouya/EngramContextProtocol/internal/text"
 )
 
@@ -313,6 +314,47 @@ var migrations = []string{
 	    CASE WHEN substr(namespace, 6) = 'developer' THEN 'builtin' ELSE 'unknown (installed before 0.11)' END,
 	    min(created_at), min(created_at)
 	  FROM memories WHERE namespace LIKE 'pack/%' GROUP BY namespace;`,
+	// 14 (0.13.0): measuring and learning recall: a log of every recall with the
+	// features of its results, feedback linked to the recall it judged, recorded
+	// evaluations, and learned models.
+	`CREATE TABLE IF NOT EXISTS recall_log (
+	  id         TEXT PRIMARY KEY,
+	  at         TEXT NOT NULL,
+	  client     TEXT NOT NULL,
+	  query      TEXT NOT NULL,
+	  k          INTEGER NOT NULL,
+	  hops       INTEGER NOT NULL,
+	  namespaces TEXT NOT NULL,
+	  variant    TEXT NOT NULL,
+	  results    TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS recall_log_client ON recall_log(client, at);
+	CREATE INDEX IF NOT EXISTS recall_log_at ON recall_log(at);
+	ALTER TABLE feedback ADD COLUMN recall_id TEXT;
+	CREATE INDEX IF NOT EXISTS feedback_recall ON feedback(recall_id);
+	CREATE TABLE IF NOT EXISTS eval_runs (
+	  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+	  at      TEXT NOT NULL,
+	  kind    TEXT NOT NULL,
+	  name    TEXT NOT NULL,
+	  config  TEXT NOT NULL,
+	  dataset TEXT NOT NULL,
+	  metrics TEXT NOT NULL,
+	  notes   TEXT
+	);
+	CREATE TABLE IF NOT EXISTS models (
+	  id           TEXT PRIMARY KEY,
+	  kind         TEXT NOT NULL,
+	  algo         TEXT NOT NULL,
+	  status       TEXT NOT NULL,
+	  created_at   TEXT NOT NULL,
+	  activated_at TEXT,
+	  features     TEXT NOT NULL,
+	  params       TEXT NOT NULL,
+	  train        TEXT,
+	  metrics      TEXT
+	);
+	CREATE INDEX IF NOT EXISTS models_kind ON models(kind, status);`,
 }
 
 // Accepted values (spec, "Data types").
@@ -392,6 +434,8 @@ type Scored struct {
 	Confidence float64  `json:"confidence"`
 	Reason     string   `json:"reason"`
 	Path       []string `json:"path,omitempty"`
+	// Features are what the result was ranked on; recall logs them for evaluation and learning.
+	Features *model.Features `json:"-"`
 }
 
 // Grant is one client's access to one namespace.
@@ -428,6 +472,9 @@ type RecallInput struct {
 	Namespaces []string
 	AsOf       string
 	Hops       int // spreading-activation hops, 0 to 3: 0 = direct matches only (the server defaults to 2)
+	// Config switches mechanisms off or sets constants (evaluation, ablations).
+	// It is never set by clients; nil is the engine as configured.
+	Config *RecallConfig
 }
 
 // Store is one Engram instance.
@@ -439,6 +486,8 @@ type Store struct {
 
 	idxOnce sync.Once
 	idx     *vecIndex // in-memory vector index, refreshed from the vectors table
+
+	models modelCache // learned models in use
 }
 
 // Open opens (creating if needed) the database at path. Use ":memory:" for tests.
@@ -975,11 +1024,56 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		return []Scored{}, nil
 	}
 
+	// Which engine serves this recall: the caller's config, an online experiment's
+	// arm, or the default (the hand-set formula plus any active learned models).
+	recallID := "rcl_" + newID()
+	variant := "default"
+	cfg := RecallConfig{Ranker: "active", Calibrator: "active"}
+	switch {
+	case in.Config != nil:
+		cfg = *in.Config
+		variant = "config:" + cfg.Name
+	case effects && grants:
+		if exp, err := s.CurrentExperiment(); err == nil && exp != nil {
+			if assign(recallID, exp.Share) {
+				cfg, variant = exp.Variant, "exp:"+exp.Name+"/variant"
+			} else {
+				variant = "exp:" + exp.Name + "/control"
+			}
+		}
+	}
+	if cfg.NoModels {
+		cfg.Ranker, cfg.Calibrator = "", ""
+	}
+	if cfg.NoKeyword && (cfg.NoSemantic || qvec == nil) {
+		return nil, ecp.Errorf(ecp.InvalidParams, "this configuration switches off every relevance signal")
+	}
+	if cfg.NoKeyword {
+		query = nil
+	}
+	if cfg.NoSemantic {
+		qvec = nil
+	}
+	ranker, rankerID, err := s.resolveModel(model.KindRanker, cfg.Ranker)
+	if err != nil {
+		return nil, err
+	}
+	calib, calibID, err := s.resolveModel(model.KindCalibrator, cfg.Calibrator)
+	if err != nil {
+		return nil, err
+	}
+	if rankerID != "" {
+		variant += "+ranker:" + rankerID
+	}
+	if calibID != "" {
+		variant += "+calibrator:" + calibID
+	}
+
 	where := []string{"1=1"}
 	args := []any{}
-	model := ""
+	embModel := ""
 	if s.emb != nil {
-		model = s.emb.Model()
+		embModel = s.emb.Model()
 	}
 	if !all {
 		where = append(where, "m.namespace IN ("+placeholders(len(allowed))+")")
@@ -1018,7 +1112,7 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		q := `SELECT ` + memoryColumnsM + `, m.activations, v.vec FROM memories m
 			LEFT JOIN vectors v ON v.memory_id = m.id AND v.model = ?
 			WHERE ` + strings.Join(where, " AND ") + extra + tail
-		all := append(append([]any{model}, args...), extraArgs...)
+		all := append(append([]any{embModel}, args...), extraArgs...)
 		rows, err := s.db.Query(q, all...)
 		if err != nil {
 			return 0, err
@@ -1086,15 +1180,33 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		score, conf float64
 		reason      string
 		path        []string
+		pathW       float64 // product of edge weights along the path
+		edge        string  // kind of the last edge
+		overridden  bool
 	}
 	scored := map[int]cand{}
 	index := map[string]int{}
+	relW := cfg.relWeight()
 	prior := make([]float64, len(mems)) // how readily each memory comes to mind, 0..1
+	base := make([]float64, len(mems))
+	kwS := make([]float64, len(mems))
+	semS := make([]float64, len(mems))
+	agree := make([]bool, len(mems))
+	priorOf := func(i int) {
+		base[i] = baseLevel(acts[i], mems[i].CreatedAt, now)
+		prior[i] = 0.6*mems[i].Strength + 0.4*base[i]
+	}
+	combine := func(rel, p float64) float64 {
+		if cfg.NoPrior {
+			return rel
+		}
+		return relW*rel + (1-relW)*p
+	}
 	for i, m := range mems {
 		index[m.ID] = i
-		prior[i] = 0.6*m.Strength + 0.4*baseLevel(acts[i], m.CreatedAt, now)
+		priorOf(i)
 		kwScore := 0.0
-		if kw[i] > 0 {
+		if !cfg.NoKeyword && kw[i] > 0 {
 			kwScore = kw[i] / (kw[i] + 1)
 		}
 		sem, hasSem := 0.0, false
@@ -1103,18 +1215,23 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 				sem, hasSem = (c-minSim)/(1-minSim), true
 			}
 		}
+		kwS[i], semS[i] = kwScore, sem
 		if kwScore == 0 && !hasSem {
 			continue
 		}
 		rel, conf := kwScore, kwScore
 		reason := "keyword match"
-		if qvec != nil {
+		switch {
+		case qvec != nil && cfg.NoKeyword:
+			rel, conf, reason = sem, sem, "meaning match"
+		case qvec != nil:
 			rel = 0.5*kwScore + 0.5*sem
 			conf = rel
 			switch {
 			case hasSem && kwScore > 0:
 				reason = "meaning and keyword match"
 				conf = math.Min(1, rel*1.25) // two independent signals agree
+				agree[i] = true
 			case hasSem:
 				reason = "meaning match"
 			}
@@ -1122,11 +1239,11 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		if m.Kind == "decision" {
 			reason += ", user decision"
 		}
-		scored[i] = cand{score: 0.75*rel + 0.25*prior[i], conf: conf, reason: reason}
+		scored[i] = cand{score: combine(rel, prior[i]), conf: conf, reason: reason, pathW: 1}
 	}
 
 	// Memories the user explicitly overrode are demoted, and say so.
-	if len(scored) > 0 {
+	if len(scored) > 0 && !cfg.NoOverride {
 		ids := make([]string, 0, len(scored))
 		for i := range scored {
 			ids = append(ids, mems[i].ID)
@@ -1145,6 +1262,7 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 			c := scored[i]
 			c.score *= 0.5
 			c.reason += ", overridden by the user"
+			c.overridden = true
 			scored[i] = c
 		}
 		rows.Close()
@@ -1153,20 +1271,24 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 	// Spreading activation: a beam of the strongest activations spreads along
 	// learned and similarity edges, a_j = a_i · w / √deg(i), for up to 3 hops.
 	hops := max(0, min(in.Hops, 3))
+	if cfg.NoSpreading {
+		hops = 0
+	}
+	damping, beam := cfg.damping(), cfg.beam()
 	frontier := make([]int, 0, len(scored))
 	for i := range scored {
 		frontier = append(frontier, i)
 	}
 	for hop := 0; hop < hops && len(frontier) > 0; hop++ {
 		sort.Slice(frontier, func(a, b int) bool { return scored[frontier[a]].score > scored[frontier[b]].score })
-		if len(frontier) > 10 {
-			frontier = frontier[:10]
+		if len(frontier) > beam {
+			frontier = frontier[:beam]
 		}
 		ids := make([]string, len(frontier))
 		for k, i := range frontier {
 			ids[k] = mems[i].ID
 		}
-		nbs, err := s.neighbors(ids)
+		nbs, err := s.neighbors(ids, cfg.SpreadAbout)
 		if err != nil {
 			return nil, err
 		}
@@ -1188,7 +1310,9 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 				}
 				for i := before; i < len(mems); i++ {
 					index[mems[i].ID] = i
-					prior = append(prior, 0.6*mems[i].Strength+0.4*baseLevel(acts[i], mems[i].CreatedAt, now))
+					prior, base = append(prior, 0), append(base, 0)
+					kwS, semS, agree = append(kwS, 0), append(semS, 0), append(agree, false)
+					priorOf(i)
 				}
 				for _, id := range missing {
 					if _, ok := index[id]; !ok {
@@ -1200,13 +1324,23 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		var next []int
 		for _, si := range frontier {
 			src := scored[si]
-			deg := math.Max(1, float64(len(nbs[mems[si].ID])))
-			for _, n := range nbs[mems[si].ID] {
+			list := nbs[mems[si].ID]
+			if cfg.NoHebbian {
+				kept := list[:0:0]
+				for _, n := range list {
+					if n.kind != "coactive" {
+						kept = append(kept, n)
+					}
+				}
+				list = kept
+			}
+			deg := math.Max(1, float64(len(list)))
+			for _, n := range list {
 				j, ok := index[n.id] // only memories that pass this query's filters
 				if !ok {
 					continue
 				}
-				act := src.score * n.weight * 0.9 / math.Sqrt(deg)
+				act := src.score * n.weight * damping / math.Sqrt(deg)
 				if cur, ok := scored[j]; ok && cur.score >= act {
 					continue
 				}
@@ -1215,7 +1349,8 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 					path = []string{mems[si].ID, n.id}
 				}
 				scored[j] = cand{score: act, conf: src.conf * n.weight,
-					reason: "via " + n.kind + " pathway from " + path[0], path: path}
+					reason: "via " + n.kind + " pathway from " + path[0], path: path,
+					pathW: src.pathW * n.weight, edge: n.kind}
 				next = append(next, j)
 			}
 		}
@@ -1223,15 +1358,43 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 	}
 
 	order := make([]int, 0, len(scored))
+	feats := map[int]*model.Features{}
+	rank := map[int]float64{} // what results are ordered by: the hand-set score, or a learned ranker's
 	for i, c := range scored {
 		if c.score >= 0.005 && c.conf >= 0.01 { // drop noise; weak pathways still surface, ranked last with low confidence
 			order = append(order, i)
+			f := &model.Features{Keyword: kwS[i], Semantic: semS[i], Prior: prior[i], Strength: mems[i].Strength,
+				BaseLevel: base[i], Hops: float64(max(0, len(c.path)-1)), PathWeight: c.pathW,
+				Activations: math.Log1p(float64(acts[i])), HandScore: c.score, HandConf: math.Min(1, c.conf)}
+			if qvec != nil && !cfg.NoKeyword {
+				f.Relevance = 0.5*kwS[i] + 0.5*semS[i]
+			} else if qvec != nil {
+				f.Relevance = semS[i]
+			} else {
+				f.Relevance = kwS[i]
+			}
+			if created, err := time.Parse(time.RFC3339, mems[i].CreatedAt); err == nil {
+				f.AgeDays = math.Log1p(math.Max(0, now.Sub(created).Hours()/24))
+			}
+			f.SetKind(mems[i].Kind)
+			f.SetEdge(c.edge)
+			if c.overridden {
+				f.Overridden = 1
+			}
+			if agree[i] {
+				f.Agreement = 1
+			}
+			feats[i] = f
+			rank[i] = c.score
+			if sc, ok := ranker.(model.Scorer); ok {
+				rank[i] = sc.Score(f.Vector())
+			}
 		}
 	}
 	sort.SliceStable(order, func(a, b int) bool {
-		ca, cb := scored[order[a]], scored[order[b]]
-		if ca.score != cb.score {
-			return ca.score > cb.score
+		ra, rb := rank[order[a]], rank[order[b]]
+		if ra != rb {
+			return ra > rb
 		}
 		return mems[order[a]].ID < mems[order[b]].ID
 	})
@@ -1241,6 +1404,9 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 	for _, i := range order {
 		dup := false
 		for _, k := range kept {
+			if cfg.NoInhibition {
+				break
+			}
 			if nearDuplicate(mems[i], mems[k], vecs[i], vecs[k]) {
 				dup = true
 				break
@@ -1251,8 +1417,12 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		}
 		kept = append(kept, i)
 		c := scored[i]
-		results = append(results, Scored{Memory: mems[i], Score: round4(c.score), Confidence: round4(math.Min(1, c.conf)),
-			Reason: c.reason, Path: c.path})
+		conf := math.Min(1, c.conf)
+		if cal, ok := calib.(model.Calibrator); ok {
+			conf = cal.Calibrate(conf)
+		}
+		results = append(results, Scored{Memory: mems[i], Score: round4(c.score), Confidence: round4(conf),
+			Reason: c.reason, Path: c.path, Features: feats[i]})
 		if len(results) == in.K {
 			break
 		}
@@ -1273,6 +1443,11 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 	if effects {
 		detail, _ := json.Marshal(map[string]any{"q": in.Query, "n": len(results)})
 		_ = audit(s.db, client, "recall", "", string(detail))
+		if grants && !historical {
+			if err := s.logRecall(recallID, client, in, variant, results); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return results, nil
 }

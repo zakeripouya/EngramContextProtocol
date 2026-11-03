@@ -33,12 +33,17 @@ func TestBoundsTrip(t *testing.T) {
 func TestDriftDetection(t *testing.T) {
 	steady := Metrics{CoactiveEdges: 50, WeightHist: []float64{0.1, 0.3, 0.3, 0.2, 0.1, 0, 0, 0, 0, 0}}
 	history := []Metrics{steady, steady, steady}
-	if r := Evaluate(steady, history); len(r.Drift) != 1 || r.Drift[0].Status != OK {
+	if r := Evaluate(steady, history); len(r.Drift) != 2 || r.Drift[0].Status != OK || r.Drift[1].Status != OK {
 		t.Fatalf("no drift expected: %+v", r.Drift)
 	}
 	shifted := Metrics{CoactiveEdges: 50, WeightHist: []float64{0, 0, 0, 0, 0, 0, 0.1, 0.2, 0.3, 0.4}}
-	if r := Evaluate(shifted, history); r.Drift[0].Status != Breach {
-		t.Fatalf("a sharp shift should breach: %+v", r.Drift)
+	if r := Evaluate(shifted, history); r.Drift[0].Status != Breach || r.Drift[1].Status != Breach {
+		t.Fatalf("a sharp shift should breach PSI and KS: %+v", r.Drift)
+	}
+	// A small shift on few edges is not significant for KS.
+	nudged := Metrics{CoactiveEdges: 20, WeightHist: []float64{0.1, 0.25, 0.35, 0.2, 0.1, 0, 0, 0, 0, 0}}
+	if r := Evaluate(nudged, []Metrics{{CoactiveEdges: 20, WeightHist: steady.WeightHist}, {CoactiveEdges: 20, WeightHist: steady.WeightHist}, {CoactiveEdges: 20, WeightHist: steady.WeightHist}}); r.Drift[1].Status != OK {
+		t.Fatalf("a small shift on 20 edges should not be significant: %+v", r.Drift[1])
 	}
 	if r := Evaluate(steady, nil); len(r.Drift) != 0 {
 		t.Fatal("drift needs history")

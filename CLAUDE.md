@@ -4,9 +4,10 @@ Notes for AI agents (and people) working in this repo.
 
 ## Where things stand
 
-- Milestones M1–M11 are implemented, plus project absorption and the interactive setup (0.12.0). **[docs/backlog.md](docs/backlog.md) is the source of truth for what's left**: protocol, v2 mechanisms, polish and known rough edges.
+- Milestones M1–M11 are implemented, plus project absorption and the interactive setup (0.12.0) and evaluation with learned models (0.13.0). **[docs/backlog.md](docs/backlog.md) is the source of truth for what's left**: protocol, v2 mechanisms, polish and known rough edges.
 - When you ship a backlog item: tick it, add a CHANGELOG entry, and update the matching *design* label in README.md and docs/design.md. When you find a new gap, add it to the backlog with a phase and size tag instead of leaving a TODO comment.
 - Docs never claim more than the code does. If something is partial, say what part.
+- Changes to recall should be measured, not argued: `engram bench locomo --ablations` and `engram eval --ablations` (see docs/evaluation.md).
 
 ## Build and test
 
@@ -23,7 +24,8 @@ gofmt -l . && go vet ./... && go test -timeout 300s ./...
 
 ## Layout
 
-- `cmd/engram`: the CLI (init with its full-screen setup in `tui.go` and shared core in `setup.go`, absorb, serve, pair, import, sleep, health, trigger, listen, job, hook, permit, dashboard, report, ...)
+- `internal/eval` (metrics, held-out evaluation, benchmarks, experiments), `internal/model` (learned models), `ml/` (optional Python training)
+- `cmd/engram`: the CLI (eval, bench, model, experiment in `evalcmd.go`; init with its full-screen setup in `tui.go` and shared core in `setup.go`, absorb, serve, pair, import, sleep, health, trigger, listen, job, hook, permit, dashboard, report, ...)
 - `internal/store`: SQLite store, schema and ordered migrations (append new ones at the end of `migrations`), recall, learning, sessions, push, triggers, permits, dashboard queries
 - `internal/server`: MCP tools and resources (the ECP MCP compatibility profile) and push watcher
 - `internal/ecpserver`: native ECP (JSON-RPC engram/* methods, stdio and HTTP transports, notifications)

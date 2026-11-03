@@ -268,15 +268,19 @@ type neighbor struct {
 }
 
 // neighbors returns the "similar" and "coactive" edges touching each id.
-func (s *Store) neighbors(ids []string) (map[string][]neighbor, error) {
+func (s *Store) neighbors(ids []string, withAbout ...bool) (map[string][]neighbor, error) {
 	out := map[string][]neighbor{}
 	if len(ids) == 0 {
 		return out, nil
 	}
 	ph := placeholders(len(ids))
 	args := append(toAny(ids), toAny(ids)...)
+	kinds := `'similar','coactive'`
+	if len(withAbout) > 0 && withAbout[0] {
+		kinds += `,'about'`
+	}
 	rows, err := s.db.Query(`SELECT src, dst, kind, weight FROM edges
-		WHERE kind IN ('similar','coactive') AND (src IN (`+ph+`) OR dst IN (`+ph+`))`, args...)
+		WHERE kind IN (`+kinds+`) AND (src IN (`+ph+`) OR dst IN (`+ph+`))`, args...)
 	if err != nil {
 		return nil, err
 	}

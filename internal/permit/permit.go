@@ -33,6 +33,9 @@ type Prediction struct {
 	Decision   string  `json:"decision"` // allow or ask
 	Confidence float64 `json:"confidence"`
 	Precedents int     `json:"precedents"`
+	// Set when an activated learned model made the call (still shadow mode).
+	Model           string  `json:"model,omitempty"`
+	ModelConfidence float64 `json:"modelConfidence,omitempty"`
 }
 
 // Predict combines the rule tier with the user's past decisions in the same category.
@@ -65,6 +68,30 @@ func Predict(st *store.Store, client, tool string, input map[string]any, cwd str
 	default:
 		p.Decision = "allow"
 		p.Reason = fmt.Sprintf("eligible; you approved %d of %d similar requests (%d failed afterwards)", approved, n, failed)
+	}
+	// An activated learned model replaces the count rule inside the same safety
+	// rails: only the eligible tier, and only with enough precedents.
+	if sc, id := activeModel(st); sc != nil && c.Tier != Never {
+		if hist, err := Chronological(st); err == nil {
+			h := NewHistory()
+			for _, r := range hist {
+				if r.Client == client {
+					h.Add(r)
+				}
+			}
+			req := store.PermitRequest{Client: client, Tool: tool, InputHash: inputHash(tool, input), Category: c.Category,
+				Tier: c.Tier, At: store.Now().Format(time.RFC3339)}
+			pm := round3(sc.Score(h.Vector(req)))
+			p.Model, p.ModelConfidence = id, pm
+			switch {
+			case c.Tier == Eligible && n >= MinPrecedents && pm >= MinConfidence:
+				p.Decision = "allow"
+				p.Reason = fmt.Sprintf("eligible; learned model %s gives %.2f (%d precedents)", id, pm, n)
+			case p.Decision == "allow":
+				p.Decision = "ask"
+				p.Reason = fmt.Sprintf("eligible, but learned model %s gives only %.2f", id, pm)
+			}
+		}
 	}
 	return p, nil
 }

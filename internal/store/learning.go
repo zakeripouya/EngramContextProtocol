@@ -140,8 +140,8 @@ func (s *Store) Feedback(client string, in FeedbackInput) (FeedbackResult, error
 		if _, err := tx.Exec(`UPDATE memories SET strength = ? WHERE id = ?`, st, m.ID); err != nil {
 			return FeedbackResult{}, err
 		}
-		if _, err := tx.Exec(`INSERT INTO feedback(at, client, memory_id, outcome, objective, query) VALUES (?,?,?,?,?,?)`,
-			ts(now), client, m.ID, in.Outcome, nullable(in.Objective), nullable(in.Query)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO feedback(at, client, memory_id, outcome, objective, query, recall_id) VALUES (?,?,?,?,?,?,?)`,
+			ts(now), client, m.ID, in.Outcome, nullable(in.Objective), nullable(in.Query), nullable(recallFor(tx, client, m.ID, now))); err != nil {
 			return FeedbackResult{}, err
 		}
 	}

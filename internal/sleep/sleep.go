@@ -168,6 +168,10 @@ func Run(ctx context.Context, st *store.Store, o Options) (Report, error) {
 	if rep.SelfTest, err = selfTest(st); err != nil {
 		return rep, err
 	}
+	// Recalls nobody judged stop being useful as training data after six months.
+	if n, err := st.PruneRecallLog(store.Now().Add(-180 * 24 * time.Hour)); err == nil && n > 0 {
+		rep.Notes = append(rep.Notes, fmt.Sprintf("removed %d unjudged recall-log entries older than 180 days", n))
+	}
 	changes, err := st.Changes(runID)
 	if err != nil {
 		return rep, err

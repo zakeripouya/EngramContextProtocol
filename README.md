@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`), M9 (permission assist in shadow mode), M10 (the local dashboard, approvals inbox and static report) and M11 (native ECP over stdio and HTTP, the conformance suite, SDKs, `engram init`, releases, Docker and the signed pack registry) are implemented and tested, plus project absorption and the interactive setup (0.12.0). Everything marked *design* below is specified but not built yet; the [backlog](docs/backlog.md) tracks every remaining item. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`), M9 (permission assist in shadow mode), M10 (the local dashboard, approvals inbox and static report) and M11 (native ECP over stdio and HTTP, the conformance suite, SDKs, `engram init`, releases, Docker and the signed pack registry) are implemented and tested, plus project absorption and the interactive setup (0.12.0) and evaluation with learned models (0.13.0). Everything marked *design* below is specified but not built yet; the [backlog](docs/backlog.md) tracks every remaining item. See the [roadmap](#roadmap).
 
 ---
 
@@ -114,6 +114,10 @@ The scheduler calls `engram sleep run --if-due` every 15 minutes; it only works 
 | --- | --- |
 | `engram init [--scan DIR] [--plain\|--yes] [--dry-run --json]` | Set up models, agents, projects, sleep hours, scheduler and starting knowledge (full-screen in a terminal) |
 | `engram absorb [DIR\|REPO ...] [--ns NS] [--dry-run] [--json]` | Absorb projects: git history, agent rules, docs and stack; re-runs add only what changed |
+| `engram eval [--ablations] [--model ID]` / `permits` / `runs` / `show` / `compare` / `export` | Measure recall and the permission assist on held-out feedback, with intervals |
+| `engram bench locomo\|longmemeval FILE [--qa] [--ablations]` | Public long-term-memory benchmarks |
+| `engram model train ranker\|calibrator\|permit [--activate]` / `list` / `activate` / `off` | Learned models behind held-out gates |
+| `engram experiment start NAME --variant CONFIG` / `status` / `stop` | A/B-test a recall configuration on live recalls |
 | `engram serve [--client NAME]` | Serve over stdio: MCP, or native ECP when the client's first message is an ECP `initialize` |
 | `engram serve --http 127.0.0.1:7079` | Serve native ECP at `/ecp` and MCP at `/mcp` over HTTP, with bearer tokens |
 | `engram token create CLIENT [--service]` / `list` / `revoke` | Issue and revoke HTTP tokens; service tokens write as `system` |
@@ -213,6 +217,7 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | `engram init`, release binaries, `install.sh`, Homebrew formula, Docker image and Compose | ✅ M11 |
 | Signed packs, registries (local, public, private), updates that keep learned weights, instance export, packs view | ✅ M11 |
 | Postgres backend for teams | design (its own milestone) |
+| Recall log, `engram eval` (held-out ranking metrics, calibration, baselines, ablations, bootstrap intervals), `engram bench` (LoCoMo, LongMemEval, LLM judge), A/B experiments, learned ranker (pairwise or XGBoost), calibrator and permission model behind held-out gates, KS drift test | ✅ 0.13.0 (benchmarks not yet run with a real embedding model) |
 
 ---
 
@@ -541,6 +546,8 @@ See [SECURITY.md](SECURITY.md) for the threat model and reporting.
 | Echo resistance | Do anti-echo rules prevent self-reinforcement? | Weight drift under repeated restatement | Same system without the rules |
 
 Each mechanism is ablated individually. Engineering targets: recall under 100 ms locally at 100k memories; install under five minutes.
+
+**Measuring it** *(✅ 0.13.0)*: every recall is logged with the features of what it returned, and feedback is linked to the recall it judged. `engram eval` measures recall on your own held-out feedback (time-split; Recall@k, MRR, NDCG@k, calibration; baselines and per-mechanism ablations; 95% bootstrap intervals), `engram bench` runs LoCoMo and LongMemEval with an optional LLM judge, `engram experiment` A/B-tests a configuration on live recalls, and `engram model` trains a ranker (built-in or XGBoost), a confidence calibrator and a permission model, each activated only when it beats the hand-set rules on held-out data. The first LoCoMo run, with the offline hashing embedder, puts Engram level with plain BM25 (Recall@10 0.558 vs 0.560): see [Evaluating Engram](docs/evaluation.md) for the method, the numbers and what they mean.
 
 ---
 
@@ -962,6 +969,9 @@ internal/bootstrap/  git, Jira and JSON importers; pathway packs (built-ins in p
 internal/sleep/      the sleep cycle and sleep hours
 internal/llm/        chat client for distillation and verification
 internal/server/     MCP tools (the ECP compatibility profile)
+internal/eval/       metrics, held-out evaluation, benchmarks, experiments
+internal/model/      learned models: features, pairwise ranker, logistic regression, isotonic, XGBoost scoring
+ml/                  optional Python workers (XGBoost training)
 spec/schema.ts       normative ECP schema
 spec/schema.json     generated JSON Schema
 docs/design.md       full design document
@@ -974,6 +984,7 @@ docs/spec/ecp-v0.md  full protocol specification
 | --- | --- |
 | [Design document](docs/design.md) | Every section above in full depth |
 | [ECP v0 specification](docs/spec/ecp-v0.md) | The protocol in RFC 2119 language |
+| [Evaluating Engram](docs/evaluation.md) | How Engram is measured, the gates for learned models, and benchmark results |
 | [`spec/schema.ts`](spec/schema.ts) / [`spec/schema.json`](spec/schema.json) | Normative schema and generated JSON Schema |
 | [Contributing](CONTRIBUTING.md) | Building, testing and proposing changes |
 | [Security](SECURITY.md) | Threat model and reporting |

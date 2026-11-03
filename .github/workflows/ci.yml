@@ -49,6 +49,30 @@ jobs:
       - name: TypeScript and Python SDKs against a live server
         run: sdk/test.sh
 
+  ml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: XGBoost worker trains a ranker that Engram scores in Go and gates
+        env:
+          ENGRAM_DB: ${{ runner.temp }}/sim.db
+          ENGRAM_EMBED: hash
+          ENGRAM_LLM: "off"
+        run: |
+          pip install -r ml/requirements.txt
+          go build -o engram ./cmd/engram
+          ENGRAM_SIM_DB="$ENGRAM_DB" go test ./internal/eval/ -run TestEvaluateAndLearnFromASimulatedUser -count=1
+          ./engram eval export "$RUNNER_TEMP/data.jsonl"
+          python3 ml/train_xgboost.py "$RUNNER_TEMP/data.jsonl" "$RUNNER_TEMP/ranker.json"
+          ./engram model train ranker --algo xgboost --file "$RUNNER_TEMP/ranker.json" --activate | tee out.txt
+          grep -q "Gate: pass" out.txt
+
   conformance:
     runs-on: ubuntu-latest
     steps:

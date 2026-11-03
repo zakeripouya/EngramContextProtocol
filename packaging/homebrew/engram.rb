@@ -5,7 +5,7 @@
 class Engram < Formula
   desc "Shared, brain-inspired memory for AI agents (Engram Context Protocol)"
   homepage "https://github.com/zakeripouya/EngramContextProtocol"
-  url "https://github.com/zakeripouya/EngramContextProtocol/archive/refs/tags/v0.12.0.tar.gz"
+  url "https://github.com/zakeripouya/EngramContextProtocol/archive/refs/tags/v0.13.0.tar.gz"
   sha256 "REPLACE_WITH_SOURCE_TARBALL_SHA256"
   license "Apache-2.0"
   head "https://github.com/zakeripouya/EngramContextProtocol.git", branch: "main"

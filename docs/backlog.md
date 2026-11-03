@@ -69,8 +69,8 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 - [ ] Seeding by sparse-code overlap, not only keywords and embeddings. Needs §2 sparse codes. `research` `M`
 - [ ] A* with embedding distance for connecting two known concepts. `v2` `M`
 - [ ] "Don't know" answers: return nothing, explicitly, when confidence is low across the board. `polish` `S`
-- [ ] Calibrated confidence (isotonic or Platt) once feedback data exists. Today it's heuristic. `v2` `M`
-- [ ] Learning-to-rank with gradient-boosted trees (XGBoost or LightGBM, `rank:pairwise` / `lambdarank`), trained on accepts and overrides. `v2` `L`
+- [x] Calibrated confidence: isotonic calibration trained on judged results, activated only when it lowers held-out ECE and Brier (`engram model train calibrator`, 0.13.0). Recall's raw confidence is still the hand-set heuristic until one is active. `v2` `M`
+- [x] Learning-to-rank (0.13.0): a built-in pairwise linear ranker, and XGBoost trained by `ml/train_xgboost.py` and scored in Go; activated only on a significant held-out NDCG gain over the hand-set formula. Needs real feedback before it is more than plumbing. `v2` `L`
   - Features per recalled item: keyword score, meaning score, prior, strength, use count, age, hop count, pathway weight, edge kinds on the path, memory kind, overridden flag, namespace match.
   - Labels from the feedback table: succeeded or accepted = relevant, failed or overridden = not; items shown but never used = weak negatives.
   - Train in a Python worker during the sleep cycle (§13); save the model with a version; score in Go with a pure-Go reader of the model file (for example `leaves`), so no Python runs at recall time.
@@ -89,12 +89,15 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 
 ## 6. Testing and drift
 
-- [ ] Kolmogorov-Smirnov test alongside PSI for drift. `polish` `S`
+- [x] Recall log with per-result features, feedback linked to its recall, time-split held-out evaluation (`engram eval`), baselines, bootstrap intervals, tracked runs, online A/B experiments (`engram experiment`) (0.13.0). `M12` `L`
+- [ ] Self-tuning parameters on top of the harness: search the hand-set constants against held-out feedback (see §3). `v2` `M`
+- [ ] Auto-train candidates in the sleep cycle once enough feedback exists, reported in the morning report, activated only with approval. `v2` `S`
+- [x] Kolmogorov-Smirnov test alongside PSI for drift (0.13.0). `polish` `S`
 - [ ] Automatic rollback to the last healthy snapshot on a severe breach. Today it prints the restore command. `v2` `M`
 - [ ] Generated tests from the graph: hide a decision and predict it. `v2` `M`
 - [ ] Mutation tests for contradictions (only duplicates, secrets and runaway hubs today). `polish` `S`
 - [ ] A small adversarial agent probing for prompt injection and scope leaks. `v2` `L`
-- [ ] Bounds not measured yet: code sparsity (needs §2), forgetting-curve power-law fit, interference as the graph grows, result diversity, activation convergence, confidence calibration, trait stability. `v2` `M`
+- [ ] Bounds not measured yet: code sparsity (needs §2), forgetting-curve power-law fit, interference as the graph grows, result diversity, activation convergence, trait stability. Confidence calibration became a health bound in 0.13.0. `v2` `M`
 - [ ] Software tests from the design: property-based invariants (weights in range, provenance always present, scopes never leak), store parity once Postgres exists, and security fuzzing of scopes. Protocol conformance and the 100k-memory performance test exist (0.11.0). `M11` `L`
 
 ## 7. Triggers, push and awareness
@@ -160,7 +163,7 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 - [ ] Auto-approval per tier, only after the report shows readiness (50 resolved allow predictions at precision ≥ 0.98), with a per-tier switch. `v2` `M`
 - [ ] "Unusual means ask": inputs unlike any precedent, actions following web or email content (taint tracking), and an anomaly detector. `v2` `L`
 - [ ] Classify MCP tools (read-only vs. writes) instead of always asking. `v2` `M`
-- [ ] Learned permission model: gradient-boosted trees (or logistic regression at first) over the shadow-mode log, replacing the Beta approval count. Features: tier, command and arguments, file types, working directory, time of day, recent failures, client. Same Python-train / Go-score split as learning-to-rank. Ships only if the agreement report shows it beats the current rule. A good first ML item: the data and the success metric already exist. `v2` `M`
+- [x] Learned permission model (0.13.0, logistic regression; gated on held-out precision ≥ 0.98 and more auto-approvals than the rule): gradient-boosted trees (or logistic regression at first) over the shadow-mode log, replacing the Beta approval count. Features: tier, command and arguments, file types, working directory, time of day, recent failures, client. Same Python-train / Go-score split as learning-to-rank. Ships only if the agreement report shows it beats the current rule. A good first ML item: the data and the success metric already exist. `v2` `M`
 - [ ] Daily audit review of auto-approvals with their precedents. `v2` `S`
 - [ ] Other hosts' permission hooks (Codex, Cursor) if they expose them. `v2` `M`
 - [ ] Re-check the Claude Code hook semantics as they evolve. Denials are inferred because no hook fires on a manual deny, and `PermissionRequest` carries no `tool_use_id`. `polish` `S`
@@ -181,12 +184,15 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 
 ## 16. Evaluation and publishing (M12)
 
-- [ ] LoCoMo and LongMemEval: accuracy and context tokens against HeLa-Mem, Mem0, Zep and plain RAG. `M12` `L`
+- [x] LoCoMo and LongMemEval runners with retrieval metrics, context tokens and an LLM judge (`engram bench`, 0.13.0). `M12` `M`
+- [ ] Run them with a real embedding model and chat judge, and against Mem0, Zep and HeLa-Mem. First LoCoMo run (hashing embedder): Engram Recall@10 0.558 vs BM25 0.560, see [evaluation](evaluation.md). `M12` `L`
+- [ ] Spreading activation never reaches the top 10 on LoCoMo: pathway results are always ranked below direct matches. Try reserved slots for pathway results, per-hop normalization, or letting a learned ranker decide; measure with `engram bench --ablations`. `research` `M`
+- [ ] Decide whether `about` edges should spread (the `with-about` configuration); no measurable effect so far. `polish` `S`
 - [ ] Held-out decision prediction: top-1 and top-3 accuracy on hidden real decisions vs. text-note memory and kNN without Hebbian edges. `M12` `L`
 - [ ] Cross-agent transfer: task success and re-explanation turns vs. isolated per-agent memory. `M12` `M`
 - [ ] Encoding: noisy recall, capacity, bind fidelity and latency of sparse codes vs. dense only. `M12` `M`
 - [ ] Echo resistance: weight drift under repeated restatement, with and without anti-echo rules. `M12` `S`
-- [ ] Per-mechanism ablations. `M12` `L`
+- [x] Per-mechanism ablations: every mechanism can be switched off (`RecallConfig`), on benchmarks and on replayed real queries (0.13.0). `M12` `L`
 - [ ] Engineering targets: recall under 100 ms at 100k memories. `M12` `M`
 - [ ] Paper draft. `M12` `L`
 

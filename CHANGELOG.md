@@ -2,6 +2,26 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.13.0] - 2026-11-03
+
+Measuring Engram like an ML system, and learning from it.
+
+### Added
+
+- **Recall log.** Every client recall is logged with the configuration that served it and each result's rank, score, confidence and features (keyword and meaning scores, prior, strength, hops, pathway weight, kind, age, use, the hand-set score). Feedback is linked to the recall it judged. Unjudged entries are pruned after 180 days.
+- **`engram eval`**: ranking quality on your own held-out feedback. Time split (newest 30% or `--split DATE`); Recall@k, precision@k, MRR and NDCG@k; 95% bootstrap intervals and paired comparisons against the hand-set formula; baselines (`bm25`, `embeddings`, `hybrid`, `prior`); calibration (ECE, Brier, reliability table). `--ablations` replays the test queries with each mechanism switched off against the newest snapshot from before the test period. Also `eval permits`, `runs`, `show`, `compare` and `export`.
+- **Switchable mechanisms** (`RecallConfig`): keyword, meaning, prior, spreading, Hebbian pathways, inhibition and override demotion can each be turned off, the constants changed, and `about` edges optionally spread (`with-about`). Default recall is unchanged.
+- **`engram bench`**: LoCoMo and LongMemEval runners. Each conversation goes into a fresh store; retrieval is scored against the evidence turns per question type, with context tokens; `--qa` answers with the chat model and grades with an LLM judge; `--ablations` and `--link-turns` compare variants.
+- **`engram model`**: a built-in pairwise linear ranker; XGBoost rankers trained by `ml/train_xgboost.py` and scored in Go (checked against XGBoost's own predictions); isotonic confidence calibration; a logistic-regression permission model. Each is stored with its held-out evaluation and activated only if it passes its gate (see docs/evaluation.md); `engram model off KIND` returns to the hand-set rules. Activated models serve real recalls and permission predictions, which the log records.
+- **`engram experiment`**: A/B tests on live recalls. A share of recalls, assigned at random by recall id, gets the variant; status compares accept rate and MRR with an unpaired bootstrap.
+- Health: a Kolmogorov–Smirnov test next to PSI for pathway-weight drift, and confidence calibration (ECE over the last 30 days) as a measured bound.
+- CI job that runs the whole XGBoost loop: simulated feedback, export, Python training, Go scoring and the gate.
+- [Evaluating Engram](docs/evaluation.md): the method, the gates and the first results.
+
+### Results
+
+- LoCoMo (10 conversations, 1,536 questions, k = 10, offline hashing embedder): Engram Recall@10 0.558 [0.53–0.58], BM25 0.560 [0.54–0.58]. Spreading, the prior and Hebbian learning make no measurable difference on a cold store; spreading never reaches the top 10. Not yet run with a real embedding model or a chat judge.
+
 ## [0.12.0] - 2026-11-03
 
 Setup that absorbs what you already have.

@@ -643,6 +643,8 @@ Engram's novelty is claimed only where a benchmark shows it. Each experiment com
 
 **Ablations:** remove each mechanism (kNN wiring, Hebbian updates, spreading activation, consolidation, sparse codes) and measure the drop.
 
+**Implemented (0.13.0):** the recall log, held-out evaluation, baselines and ablations, bootstrap intervals, online experiments, the LoCoMo and LongMemEval runners and gated learned models. See [Evaluating Engram](evaluation.md) for the method and first results.
+
 **Engineering metrics:** recall latency (target under 100 ms locally at 100k nodes), storage per memory, install time (target under 5 minutes).
 
 ## Packaging and distribution

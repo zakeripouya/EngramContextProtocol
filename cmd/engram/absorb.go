@@ -155,9 +155,14 @@ func runAbsorb(st *store.Store, args []string) error {
 
 // reorderFlags lets flags follow the paths (engram absorb ~/code --dry-run),
 // which the standard flag package would otherwise treat as more paths.
-func reorderFlags(args []string) []string {
-	valued := map[string]bool{"-ns": true, "--ns": true, "-depth": true, "--depth": true, "-since": true, "--since": true,
-		"-max-commits": true, "--max-commits": true, "-grant": true, "--grant": true}
+func reorderFlags(args []string, valuedNames ...string) []string {
+	if len(valuedNames) == 0 {
+		valuedNames = []string{"ns", "depth", "since", "max-commits", "grant"}
+	}
+	valued := map[string]bool{}
+	for _, n := range valuedNames {
+		valued["-"+n], valued["--"+n] = true, true
+	}
 	var flags, rest []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]

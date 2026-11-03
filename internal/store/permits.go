@@ -105,7 +105,7 @@ func (s *Store) PermitPrecedents(client, category string) (approved, denied, fai
 
 // Permits returns logged requests, newest first.
 func (s *Store) Permits(limit int) ([]PermitRequest, error) {
-	rows, err := s.db.Query(`SELECT id, at, client, session_id, tool, summary, category, tier, predicted, confidence,
+	rows, err := s.db.Query(`SELECT id, at, client, session_id, tool, input_hash, summary, category, tier, predicted, confidence,
 		precedents, reason, outcome, COALESCE(objective,''), COALESCE(resolved_at,''), COALESCE(resolved_how,'')
 		FROM permits ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
@@ -115,7 +115,7 @@ func (s *Store) Permits(limit int) ([]PermitRequest, error) {
 	out := []PermitRequest{}
 	for rows.Next() {
 		var r PermitRequest
-		if err := rows.Scan(&r.ID, &r.At, &r.Client, &r.SessionID, &r.Tool, &r.Summary, &r.Category, &r.Tier,
+		if err := rows.Scan(&r.ID, &r.At, &r.Client, &r.SessionID, &r.Tool, &r.InputHash, &r.Summary, &r.Category, &r.Tier,
 			&r.Predicted, &r.Confidence, &r.Precedents, &r.Reason, &r.Outcome, &r.Objective, &r.ResolvedAt,
 			&r.ResolvedHow); err != nil {
 			return nil, err
