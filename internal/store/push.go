@@ -294,8 +294,37 @@ func (s *Store) LatestNotification(subIDs []string) (int64, error) {
 // PendingNotifications returns a client's unread notifications with the memories it
 // may still read, oldest first. markRead marks them delivered.
 func (s *Store) PendingNotifications(client string, markRead bool) ([]Notification, error) {
-	rows, err := s.db.Query(`SELECT id, subscription_id, event_id, memory_ids, reason, salience, created_at
-		FROM notifications WHERE client = ? AND read_at IS NULL ORDER BY id LIMIT 50`, client)
+	return s.pending(client, nil, markRead)
+}
+
+// PendingFor returns unread notifications for specific subscriptions of a client,
+// without marking them read (see MarkNotificationsRead).
+func (s *Store) PendingFor(client string, subIDs []string) ([]Notification, error) {
+	if len(subIDs) == 0 {
+		return []Notification{}, nil
+	}
+	return s.pending(client, subIDs, false)
+}
+
+// MarkNotificationsRead marks notifications delivered.
+func (s *Store) MarkNotificationsRead(ids []int64) error {
+	now := ts(Now())
+	for _, id := range ids {
+		if _, err := s.db.Exec(`UPDATE notifications SET read_at = ? WHERE id = ?`, now, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) pending(client string, subIDs []string, markRead bool) ([]Notification, error) {
+	q, args := `SELECT id, subscription_id, event_id, memory_ids, reason, salience, created_at
+		FROM notifications WHERE client = ? AND read_at IS NULL`, []any{client}
+	if len(subIDs) > 0 {
+		q += ` AND subscription_id IN (` + placeholders(len(subIDs)) + `)`
+		args = append(args, toAny(subIDs)...)
+	}
+	rows, err := s.db.Query(q+` ORDER BY id LIMIT 50`, args...)
 	if err != nil {
 		return nil, err
 	}

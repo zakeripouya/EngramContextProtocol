@@ -237,5 +237,8 @@ func (s *Store) MarkConflict(client, a, b string) error {
 	if err := s.AddEdge(a, b, "conflicts", 1); err != nil {
 		return err
 	}
+	if err := s.AddEvent("conflict", map[string]string{"a": a, "b": b}); err != nil {
+		return err
+	}
 	return audit(s.db, client, "conflict", mems[0].Namespace, a+" "+b)
 }

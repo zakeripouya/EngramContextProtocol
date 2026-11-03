@@ -107,7 +107,7 @@ tr:last-child td { border-bottom:0; } .num { text-align:right; font-variant-nume
   {{if .SelfTest.Tested}}<div>Recall self-test: found {{.SelfTest.Found}} of {{.SelfTest.Tested}} of your decisions.</div>{{end}}
   {{range .Notes}}<div class="meta">{{.}}</div>{{end}}
 </div>
-{{range .Distilled}}<div class="card"><div class="meta">Distilled</div><div>{{.Content}}</div></div>{{end}}
+{{range .Distilled}}<div class="card"><div class="meta">Distilled · {{.Verdict}}</div><div>{{.Fact}}</div></div>{{end}}
 {{else}}<div class="card meta">No sleep cycle yet.</div>{{end}}
 
 <h2>Health</h2>

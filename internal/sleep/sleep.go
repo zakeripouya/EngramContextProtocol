@@ -174,7 +174,20 @@ func Run(ctx context.Context, st *store.Store, o Options) (Report, error) {
 	}
 	rep.ChangeCount = len(changes)
 	rep.FinishedAt = store.Now().Format(time.RFC3339)
-	return rep, st.FinishRun(runID, rep)
+	if err := st.FinishRun(runID, rep); err != nil {
+		return rep, err
+	}
+	// Announce the cycle to every serving process (notifications/engram/consolidated).
+	created := 0
+	for _, d := range rep.Distilled {
+		if d.MemoryID != "" {
+			created++
+		}
+	}
+	return rep, st.AddEvent("consolidated", map[string]any{
+		"runId": runID, "created": created, "pruned": rep.Pruned + rep.Archived + rep.Merged,
+		"traits": []string{}, "light": rep.Light,
+	})
 }
 
 // dedupe merges near-identical memories of the same kind: the strongest (then oldest) is kept.

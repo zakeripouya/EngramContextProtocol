@@ -10,6 +10,16 @@ Engine milestone M11: packaging and protocol (in progress).
 
 - Recall scales past 5,000 memories: an FTS4 full-text index (Porter stemmer, in the default SQLite build) and an exact in-memory vector index supply candidates, and spreading activation loads neighbors on demand. Measured at 100,000 memories on 2 CPU cores: p50 46 ms, p95 69 ms (`ENGRAM_SCALE=1 go test -run RecallLatency100k ./internal/store/`).
 - The vector index refreshes incrementally from the database, so memories written by other processes (hooks, the trigger listener, jobs) are found without a restart. kNN wiring on insert uses the same index.
+- **Native ECP.** JSON-RPC 2.0 `engram/*` methods with `initialize`, version and capability negotiation, batches, and the spec's error codes: `observe` (with `contradicts`), `recall` (`includePaths`), `get`, `path`, `attend`, `feedback`, `forget`, `subscribe`, `unsubscribe`, `consolidate` and `session/checkpoint | resume | list | delegate`.
+- `engram/path`: the maximin (strongest weakest link) or most probable (−log weight) chain between two memories, through current memories the client may read.
+- `engram/consolidate`: runs a sleep cycle; needs a write grant on `*`.
+- Server-pushed `notifications/engram/relevant`, `conflict` and `consolidated`, only to clients that declared them, grant-filtered, and rate-limited per subscription. Conflicts and sleep cycles go through a shared event log, so whichever process caused them, every serving process announces them.
+- `engram serve` detects the protocol from the first message on stdio (native ECP or MCP). `engram serve --http ADDR` serves native ECP at `/ecp` (POST, an SSE stream on GET, DELETE) and MCP at `/mcp` (Streamable HTTP).
+- Bearer tokens: `engram token create CLIENT [--service] | list | revoke`. Tokens are stored hashed, and the token, not `clientInfo`, decides identity. Service tokens write as `author: "system"`.
+
+### Fixed
+
+- The static report failed to render nights with distilled facts (it read a field that doesn't exist).
 
 ## [0.10.0] - 2026-11-03
 

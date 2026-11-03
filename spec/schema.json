@@ -186,6 +186,9 @@
             "conflict": {
               "type": "boolean"
             },
+            "consolidated": {
+              "type": "boolean"
+            },
             "relevant": {
               "type": "boolean"
             }
@@ -282,7 +285,13 @@
             "created": {
               "type": "number"
             },
+            "light": {
+              "type": "boolean"
+            },
             "pruned": {
+              "type": "number"
+            },
+            "runId": {
               "type": "number"
             },
             "traits": {

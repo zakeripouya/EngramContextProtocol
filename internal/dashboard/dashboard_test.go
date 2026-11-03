@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zakeripouya/EngramContextProtocol/internal/sleep"
 	"github.com/zakeripouya/EngramContextProtocol/internal/store"
 )
 
@@ -125,5 +126,23 @@ func TestReportEscapesContent(t *testing.T) {
 	}
 	if !strings.Contains(out, "Engram report") || !strings.Contains(out, "Waiting for you (1)") {
 		t.Fatal("report is missing sections")
+	}
+}
+
+func TestReportShowsDistilledFacts(t *testing.T) {
+	st, _, _ := setup(t)
+	id, err := st.StartRun(false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishRun(id, sleep.Report{RunID: id, Distilled: []sleep.Distilled{{Fact: "CI always runs the smoke suite", Verdict: "supported"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	if err := WriteReport(st, &b); err != nil {
+		t.Fatalf("the report must render a night with distilled facts: %v", err)
+	}
+	if !strings.Contains(b.String(), "CI always runs the smoke suite") {
+		t.Fatal("distilled fact missing from the report")
 	}
 }

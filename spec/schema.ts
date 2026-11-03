@@ -129,7 +129,7 @@ export interface ServerInfo {
 }
 
 export interface ClientCapabilities {
-  notifications?: { relevant?: boolean; conflict?: boolean };
+  notifications?: { relevant?: boolean; conflict?: boolean; consolidated?: boolean };
   [extension: `x_${string}`]: unknown;
 }
 
@@ -353,7 +353,7 @@ export interface ConflictNotification {
 export interface ConsolidatedNotification {
   jsonrpc: "2.0";
   method: "notifications/engram/consolidated";
-  params: { created: number; pruned: number; traits: string[] };
+  params: { created: number; pruned: number; traits: string[]; runId?: number; light?: boolean };
 }
 
 /* ------------------------------------------------------------------ */

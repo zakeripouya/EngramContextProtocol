@@ -46,6 +46,18 @@ ECP uses MCP's transports unchanged.
 
 Servers MUST support stdio. Servers offering team or cloud memory MUST support Streamable HTTP.
 
+**Stdio protocol detection.** One server binary MAY serve both protocols on stdio: if the first message is an `initialize` whose `protocolVersion` is an ECP version or that carries `supportedVersions`, the connection is native ECP; otherwise it is MCP.
+
+**HTTP binding.** Native ECP over HTTP uses one endpoint (the reference server uses `/ecp`):
+
+- `POST` carries one JSON-RPC message or a batch. The response to `initialize` carries an `Ecp-Session-Id` header, which every later request MUST send. A body of notifications only gets `202 Accepted`. Unknown sessions get `404`; clients then initialize again.
+- `GET` with `Ecp-Session-Id` opens a `text/event-stream`: each server notification is one `message` event whose `data` is the JSON-RPC notification. Notifications produced while no stream is open are held (bounded) and sent when one attaches.
+- `DELETE` with `Ecp-Session-Id` ends the session and its subscriptions.
+- Every request carries `Authorization: Bearer <token>`. The token, not `clientInfo.name`, identifies the client. Requests without a valid token get `401` with error `-32003`. The reference server issues tokens through its CLI (`engram token create`), like pairing; a full OAuth 2.1 authorization server is not part of v0.
+- A token MAY be marked as a **service** identity (a cron job, CI, a webhook bridge): its `observe` writes default to `author: "system"`.
+
+Servers MAY also serve the MCP compatibility profile over Streamable HTTP with the same tokens (the reference server uses `/mcp`).
+
 ## Lifecycle
 
 Every connection runs initialize, then operation, then shutdown. No other request MAY be sent before initialization completes.

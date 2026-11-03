@@ -11,10 +11,14 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -30,6 +34,7 @@ import (
 	"github.com/zakeripouya/EngramContextProtocol/internal/bootstrap"
 	"github.com/zakeripouya/EngramContextProtocol/internal/dashboard"
 	"github.com/zakeripouya/EngramContextProtocol/internal/ecp"
+	"github.com/zakeripouya/EngramContextProtocol/internal/ecpserver"
 	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
 	"github.com/zakeripouya/EngramContextProtocol/internal/health"
 	"github.com/zakeripouya/EngramContextProtocol/internal/llm"
@@ -68,6 +73,9 @@ Usage:
   engram selftest                         run golden, programmatic and mutation tests on a sandbox copy
   engram golden add "QUERY" MEMORY_ID     add a query that must keep recalling a memory
   engram golden list                      list golden queries
+  engram serve --http ADDR                serve native ECP (/ecp) and MCP (/mcp) over HTTP, e.g. 127.0.0.1:7079
+  engram token create CLIENT [--service]  issue a bearer token for HTTP clients (shown once)
+  engram token list | revoke CLIENT|PREFIX
   engram setup HOST                       print connection instructions: claude-code, claude-desktop, codex, cursor
   engram sessions [open|done|all]         list tasks agents checkpointed
   engram session show ID                  show one task's checkpoint
@@ -173,19 +181,48 @@ func run(args []string) error {
 	case "serve":
 		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 		client := fs.String("client", "", "identity of the host that launches this server, e.g. claude-code")
+		httpAddr := fs.String("http", "", "serve native ECP (/ecp) and MCP (/mcp) over HTTP on this address instead of stdio, e.g. 127.0.0.1:7079")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
+		native := ecpserver.New(st, ecpserver.Options{Version: server.Version, SnapshotDir: snapshotDir(),
+			NewChat: func() llm.Chat { return chatFromEnv(false) }})
+		go native.Run(ctx)
+		if *httpAddr != "" {
+			if host, _, err := net.SplitHostPort(*httpAddr); err == nil && host != "127.0.0.1" && host != "localhost" && host != "::1" {
+				fmt.Fprintln(os.Stderr, "engram: warning: serving beyond this machine; put TLS in front (every request still needs a token)")
+			}
+			fmt.Fprintf(os.Stderr, "engram: serving ECP at http://%s/ecp and MCP at http://%s/mcp (bearer tokens: engram token create CLIENT)\n", *httpAddr, *httpAddr)
+			hs := &http.Server{Addr: *httpAddr, Handler: native.HTTPHandler(), ReadHeaderTimeout: 10 * time.Second}
+			go func() { <-ctx.Done(); _ = hs.Close() }()
+			if err := hs.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				return err
+			}
+			return nil
+		}
+		// stdio: the first message decides the protocol. An ECP initialize gets native
+		// ECP; anything else is MCP (spec, "MCP compatibility profile").
+		in := bufio.NewReaderSize(os.Stdin, 64*1024)
+		first, err := in.ReadBytes('\n')
+		if err != nil && len(first) == 0 {
+			return nil // the host closed stdin without a message
+		}
+		if ecpserver.IsECPInitialize(first) {
+			return native.ServeStdio(ctx, first, in, os.Stdout, *client)
+		}
 		srv := server.New(st, *client)
 		wctx, cancel := context.WithCancel(ctx)
 		watched := make(chan struct{})
 		go func() { srv.Watch(wctx, 2*time.Second); close(watched) }()
-		err := srv.Run(ctx, &mcp.StdioTransport{})
+		err = srv.Run(ctx, &mcp.IOTransport{Reader: io.NopCloser(io.MultiReader(bytes.NewReader(first), in)), Writer: os.Stdout})
 		cancel()
 		<-watched // drop this connection's subscriptions before exiting
 		return err
+
+	case "token":
+		return runToken(st, rest)
 
 	case "pair":
 		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
@@ -641,9 +678,7 @@ func runSleep(st *store.Store, args []string) error {
 		}
 		var chat llm.Chat
 		if !*light {
-			c, note := llm.New(context.Background(), llm.FromEnv())
-			fmt.Fprintln(os.Stderr, "engram:", note)
-			chat = c
+			chat = chatFromEnv(true)
 		}
 		rep, err := sleep.Run(context.Background(), st, sleep.Options{Light: *light, SnapshotDir: snapshotDir(), Chat: chat})
 		if err != nil {
@@ -1056,4 +1091,73 @@ func writeHTMLReport(st *store.Store, out string) (string, error) {
 		return "", err
 	}
 	return out, f.Close()
+}
+
+// chatFromEnv connects the configured chat model, or returns nil when none answers.
+func chatFromEnv(verbose bool) llm.Chat {
+	c, note := llm.New(context.Background(), llm.FromEnv())
+	if verbose {
+		fmt.Fprintln(os.Stderr, "engram:", note)
+	}
+	if c == nil {
+		return nil // keep the interface nil, not a typed nil
+	}
+	return c
+}
+
+func runToken(st *store.Store, args []string) error {
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "create":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: engram token create CLIENT [--service]")
+		}
+		fs := flag.NewFlagSet("token create", flag.ContinueOnError)
+		service := fs.Bool("service", false, "a headless program (cron job, CI, webhook bridge); its writes default to author system")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		tok, err := st.CreateToken(args[1], *service)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Token for %s (shown once; store it like a password):\n  %s\n", args[1], tok)
+		if gs, _ := st.Grants(args[1]); len(gs) == 0 {
+			fmt.Printf("It is not paired yet, so it can read and write nothing. Approve it with:\n  engram pair %s --read me --write me\n", args[1])
+		}
+		return nil
+	case "list":
+		ts, err := st.Tokens()
+		if err != nil {
+			return err
+		}
+		if len(ts) == 0 {
+			fmt.Println("No tokens. Create one with: engram token create CLIENT")
+		}
+		for _, t := range ts {
+			state := "active"
+			if t.Revoked {
+				state = "revoked"
+			}
+			kind := "agent"
+			if t.Service {
+				kind = "service"
+			}
+			fmt.Printf("%s…  %-20s %-8s %-8s created %s  last used %s\n", t.Prefix, t.Client, kind, state, t.CreatedAt, t.LastUsed)
+		}
+		return nil
+	case "revoke":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: engram token revoke CLIENT|PREFIX")
+		}
+		n, err := st.RevokeTokens(args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Revoked %d token(s)\n", n)
+		return nil
+	}
+	return fmt.Errorf("usage: engram token create CLIENT [--service] | list | revoke CLIENT|PREFIX")
 }
