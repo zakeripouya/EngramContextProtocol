@@ -2,6 +2,17 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.3.0] - 2026-11-03
+
+Engine milestone M3: bootstrapping, so a new Engram starts out knowing something.
+
+### Added
+
+- `engram import git`: one episode per commit, a concept per recurring file, `about` edges, `coactive` pathways between files that repeatedly change together, and facts for detected conventions (ticket-key branch names and commit messages, Conventional Commits).
+- `engram import jira` for saved Jira search exports and `engram import json` for generic records.
+- Pathway packs: the pack format, a built-in Developer pack, and `engram pack list | install | remove`.
+- Imported and pack memories carry `system` provenance, start at low strength, and are idempotent: importing twice changes nothing. Imports can never create decisions.
+
 ## [0.2.0] - 2026-11-03
 
 Engine milestone M2: the memory becomes a learning graph.

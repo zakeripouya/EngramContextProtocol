@@ -24,6 +24,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/zakeripouya/EngramContextProtocol/internal/bootstrap"
 	"github.com/zakeripouya/EngramContextProtocol/internal/ecp"
 	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
 	"github.com/zakeripouya/EngramContextProtocol/internal/server"
@@ -40,6 +41,13 @@ Usage:
   engram stats                            show memory counts
   engram reembed                          embed memories that have no vector yet and wire their neighbors
   engram decay                            weaken learned pathways and prune the weakest
+  engram import git PATH [--ns NS] [--since "6 months ago"]
+                                          import a repository's history, file coupling and conventions
+  engram import jira FILE [--ns NS]       import a saved Jira search export (JSON)
+  engram import json FILE [--ns NS]       import generic records [{"kind","content","tags","validFrom"}]
+  engram pack list                        list built-in pathway packs
+  engram pack install NAME|FILE           install a pack into pack/<name>
+  engram pack remove NAME                 uninstall a pack
   engram setup claude-code|claude-desktop print connection instructions
   engram version                          print the version
 
@@ -116,7 +124,7 @@ func run(args []string) error {
 		return err
 	}
 	defer st.Close()
-	if cmd == "serve" || cmd == "reembed" {
+	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "pack" {
 		e, note := embed.New(context.Background(), embed.FromEnv())
 		st.SetEmbedder(e)
 		fmt.Fprintln(os.Stderr, "engram:", note) // stderr: stdout carries the MCP protocol
@@ -220,6 +228,12 @@ func run(args []string) error {
 		fmt.Printf("Embedded %d memories with %s and linked %d neighbors\n", r.Embedded, r.Model, r.Linked)
 		return nil
 
+	case "import":
+		return runImport(st, rest)
+
+	case "pack":
+		return runPack(st, rest)
+
 	case "decay":
 		r, err := st.Decay()
 		if err != nil {
@@ -253,4 +267,94 @@ func setup(args []string) error {
 		return fmt.Errorf("unknown host %q; supported: claude-code, claude-desktop", args[0])
 	}
 	return nil
+}
+
+func runImport(st *store.Store, args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: engram import git|jira|json PATH [--ns NAMESPACE]")
+	}
+	kind, path := args[0], args[1]
+	fs := flag.NewFlagSet("import", flag.ContinueOnError)
+	ns := fs.String("ns", "me", "namespace to import into, e.g. team/ink")
+	since := fs.String("since", "", `git only: limit history, e.g. "6 months ago"`)
+	max := fs.Int("max", 2000, "git only: maximum commits, newest first")
+	if err := fs.Parse(args[2:]); err != nil {
+		return err
+	}
+	switch kind {
+	case "git":
+		res, err := bootstrap.ImportGit(context.Background(), st, bootstrap.GitOptions{
+			Repo: path, Namespace: *ns, Since: *since, MaxCommits: *max,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Imported %d commits (%d already known), %d files, %d co-change pathways into %s\n",
+			res.Commits, res.Skipped, res.Files, res.CoChange, *ns)
+		for _, c := range res.Conventions {
+			fmt.Println("  convention:", c)
+		}
+		return nil
+	case "jira", "json":
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		var res bootstrap.ImportResult
+		if kind == "jira" {
+			res, err = bootstrap.ImportJira(st, f, *ns)
+		} else {
+			res, err = bootstrap.ImportRecords(st, f, *ns, "import")
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Imported %d records (%d already known) into %s\n", res.Imported, res.Skipped, *ns)
+		return nil
+	}
+	return fmt.Errorf("unknown import source %q; use git, jira or json", kind)
+}
+
+func runPack(st *store.Store, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: engram pack list | install NAME|FILE | remove NAME")
+	}
+	switch args[0] {
+	case "list":
+		for _, name := range bootstrap.BuiltinPacks() {
+			p, err := bootstrap.LoadPack(name)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%-14s %-8s %s\n", p.Name, p.Version, p.Description)
+		}
+		return nil
+	case "install":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: engram pack install NAME|FILE")
+		}
+		p, err := bootstrap.LoadPack(args[1])
+		if err != nil {
+			return err
+		}
+		res, err := bootstrap.InstallPack(st, p)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Installed %s %s into %s: %d memories, %d pathways\n", p.Name, p.Version, res.Namespace, res.Memories, res.Edges)
+		fmt.Printf("Let an agent read it with: engram pair <client> --read %s\n", res.Namespace)
+		return nil
+	case "remove":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: engram pack remove NAME")
+		}
+		n, err := st.RemoveNamespace("pack/" + args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Removed %d memories from pack/%s\n", n, args[1])
+		return nil
+	}
+	return fmt.Errorf("unknown pack command %q", args[0])
 }

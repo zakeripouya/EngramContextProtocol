@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server) and M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) and M3 (bootstrapping from git, Jira and pathway packs) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
 
 ---
 
@@ -99,6 +99,10 @@ Vectors from different models are never compared; run `engram reembed` after swi
 | `engram stats` | Show memory and pathway counts |
 | `engram reembed` | Embed memories that have no vector yet and wire their neighbors |
 | `engram decay` | Weaken learned pathways and prune the weakest (nightly in M5) |
+| `engram import git PATH [--ns NS] [--since "6 months ago"]` | Import a repository's commits, file coupling and naming conventions |
+| `engram import jira FILE [--ns NS]` | Import a saved Jira search export (JSON) |
+| `engram import json FILE [--ns NS]` | Import generic records |
+| `engram pack list` / `install NAME` / `remove NAME` | Manage pathway packs |
 | `engram setup claude-code` / `claude-desktop` | Print connection instructions |
 | `engram version` | Print the engine and protocol versions |
 
@@ -125,6 +129,9 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | Hebbian learning: memories recalled together build pathways, with anti-echo | ✅ M2 |
 | Decay and pruning of learned pathways | ✅ M2 |
 | Pathway recall: one hop of spreading activation, with paths and reasons | ✅ M2 |
+| Bootstrapping: git commits, co-changed files and detected conventions | ✅ M3 |
+| Jira and generic JSON import | ✅ M3 |
+| Pathway packs: built-in Developer pack, install and remove | ✅ M3 |
 | Multi-hop spreading, feedback, confidence | design (M4) |
 | Sleep cycle, verifier, morning report | design (M5) |
 | Session handoff, second agent | design (M7) |
@@ -353,13 +360,13 @@ Every mechanism is a switchable module, phased in and kept only if an ablation s
 - **Observers** capture agent turns through hooks (Claude Code hooks, CLI wrappers) or voluntary `observe` calls; a consented browser extension can cover assistant web apps.
 - **Triggers** *(design, M8)*: cron schedules, webhooks, Kafka or Redis Streams messages, file changes and job results activate memory; anything crossing a threshold notifies an agent, calls a webhook or runs a procedure, and the outcome feeds back. Existing automations are observed, not replaced.
 - **Headless and multi-model**: any program that speaks ECP or MCP is a client (a Go service, a cron job, CI, an agent on any model). The core needs no LLM; the LLM steps use a pluggable provider, including local models.
-- **Bootstrapping**: import git history, Jira tickets, PRs and chat exports at low initial weight, so Engram starts out knowing something.
+- **Bootstrapping** *(✅ M3)*: import git history (one episode per commit, a concept per recurring file, `coactive` pathways between files that change together, and facts for detected naming conventions), Jira exports and generic JSON at low initial weight and `system` provenance, so Engram starts out knowing something. Imports are idempotent.
 
 ---
 
 ## Pathway packs
 
-*Design (M11).* Downloadable, versioned bundles of pre-wired memory that give Engram a head start in a domain, then adapt to you. Packs ship memory *structure*, not instructions.
+*The pack format, the built-in Developer pack and install/remove are implemented (M3); the registry, signing and visibility are design (M11).* Downloadable, versioned bundles of pre-wired memory that give Engram a head start in a domain, then adapt to you. Packs ship memory *structure*, not instructions.
 
 | Kind | Contains | Example |
 | --- | --- | --- |
@@ -792,7 +799,7 @@ Each milestone is roughly one to two weekends and has a done-check.
 **Phase 1 · Core memory**
 1. **M1 · Working server** ✅ Go MCP server, SQLite, pairing. *Done when* a fact told in one session is recalled in a fresh one.
 2. **M2 · Engram core** ✅ Embeddings, kNN and Hebbian edges, decay, pathway recall. *Done when* recall surfaces a memory reachable only through a pathway.
-3. **M3 · Bootstrapping:** import git and Jira history and a first Developer pack. *Done when* an agent applies a repo convention unprompted.
+3. **M3 · Bootstrapping** ✅ Git and Jira import, detected conventions and the Developer pack. *Done when* an agent applies a repo convention unprompted.
 4. **M4 · Learning and retrieval:** spreading activation, feedback, three-factor learning, ACT-R decay, lateral inhibition, confidence. *Done when* an override changes the next recall.
 
 **Phase 2 · Sleep and safety**
@@ -821,6 +828,7 @@ internal/ecp/        protocol version and error codes
 internal/store/      SQLite store, grants, time validity, ranking, graph learning, secret filter
 internal/embed/      embedding providers (OpenAI-compatible, offline hashing)
 internal/text/       tokenizer shared by ranking and hashing
+internal/bootstrap/  git, Jira and JSON importers; pathway packs (built-ins in packs/)
 internal/server/     MCP tools (the ECP compatibility profile)
 spec/schema.ts       normative ECP schema
 spec/schema.json     generated JSON Schema

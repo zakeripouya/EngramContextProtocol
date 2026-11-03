@@ -1,0 +1,36 @@
+{
+  "name": "developer",
+  "version": "0.1.0",
+  "description": "How software work fits together: tickets, branches, commits, pull requests, review, CI, migrations and releases.",
+  "memories": [
+    {"key": "ticket", "kind": "concept", "content": "Ticket: a tracked unit of work (Jira, Linear, GitHub issue) with a key, a status and an owner", "tags": ["planning"]},
+    {"key": "branch", "kind": "concept", "content": "Branch: an isolated line of development, usually one per ticket", "tags": ["git"]},
+    {"key": "commit", "kind": "concept", "content": "Commit: a recorded change with a message explaining why", "tags": ["git"]},
+    {"key": "pr", "kind": "concept", "content": "Pull request: a proposed merge of a branch, reviewed before it lands", "tags": ["git", "review"]},
+    {"key": "review", "kind": "concept", "content": "Code review: another person or agent checks a pull request for correctness, style and risk", "tags": ["review"]},
+    {"key": "ci", "kind": "concept", "content": "Continuous integration: automated build, test and lint on every push", "tags": ["ci"]},
+    {"key": "tests", "kind": "concept", "content": "Tests: unit, integration and end-to-end checks that guard behavior", "tags": ["testing"]},
+    {"key": "migration", "kind": "concept", "content": "Database migration: a versioned schema change that must run in order in every environment", "tags": ["database"]},
+    {"key": "staging", "kind": "concept", "content": "Staging environment: a copy of production for checking changes before release", "tags": ["deploy"]},
+    {"key": "release", "kind": "concept", "content": "Release: shipping merged changes to production", "tags": ["deploy"]},
+    {"key": "incident", "kind": "concept", "content": "Incident: a production problem, its fix and what was learned", "tags": ["operations"]},
+    {"key": "flow", "kind": "procedure", "content": "Typical flow: ticket → branch named after the ticket → commits → pull request → review and CI → merge → release", "tags": ["workflow"]},
+    {"key": "migration-safety", "kind": "fact", "content": "Schema migrations are hard to reverse: run them on staging first and keep them backward compatible with the running code", "tags": ["database", "risk"]},
+    {"key": "small-prs", "kind": "fact", "content": "Small, focused pull requests are reviewed faster and break less", "tags": ["review"]}
+  ],
+  "edges": [
+    {"from": "ticket", "to": "branch", "weight": 0.35},
+    {"from": "branch", "to": "commit", "weight": 0.3},
+    {"from": "branch", "to": "pr", "weight": 0.35},
+    {"from": "pr", "to": "review", "weight": 0.35},
+    {"from": "pr", "to": "ci", "weight": 0.3},
+    {"from": "ci", "to": "tests", "weight": 0.35},
+    {"from": "migration", "to": "staging", "weight": 0.3},
+    {"from": "migration", "to": "migration-safety", "weight": 0.4},
+    {"from": "release", "to": "staging", "weight": 0.3},
+    {"from": "release", "to": "incident", "weight": 0.2},
+    {"from": "flow", "to": "ticket", "weight": 0.3},
+    {"from": "flow", "to": "pr", "weight": 0.3},
+    {"from": "review", "to": "small-prs", "weight": 0.3}
+  ]
+}
