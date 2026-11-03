@@ -8,7 +8,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer that lets eve
 
 Agents connect through the Engram Context Protocol (ECP), a JSON-RPC 2.0 protocol modeled on MCP and compatible with it, so any MCP client can use Engram on day one. ECP adds what MCP lacks for awareness: an observe stream, salience queries, push notifications and feedback.
 
-**Implementation status:** milestones M1 (working server), M2 (embeddings, kNN wiring, Hebbian learning, pathway recall) M3 (bootstrapping and the Developer pack) M4 (feedback, three-factor learning, multi-hop retrieval) M5 (the sleep cycle), M6 (the testing harness), M7 (sessions and handoff) and M8 (triggers, push and `attend`) are implemented in this repository; everything else in this document is design. The protocol itself is specified in the [ECP v0 Specification](spec/ecp-v0.md).
+**Implementation status:** milestones M1 (working server), M2 (embeddings, kNN wiring, Hebbian learning, pathway recall) M3 (bootstrapping and the Developer pack) M4 (feedback, three-factor learning, multi-hop retrieval) M5 (the sleep cycle), M6 (the testing harness), M7 (sessions and handoff), M8 (triggers, push and `attend`) and M9 (permission assist in shadow mode) are implemented in this repository; everything else in this document is design. The protocol itself is specified in the [ECP v0 Specification](spec/ecp-v0.md).
 
 ## Problem and motivation
 
@@ -728,7 +728,7 @@ The design has grown well past a weekend project, so the work is phased: each ph
 **Phase 3 · Awareness**
 
 8. **M8 · Triggers and push.** ✅ Implemented (webhooks, GitHub, job results; queues and procedures are design). Headless clients (ink-cron, a GitHub webhook), subscriptions, `attend` with retrieval modes. *Done when* a failed job surfaces its related ticket and decisions to a subscribed agent.
-9. **M9 · Permission assist, shadow mode only.** Predictions logged, the user still decides. *Done when* several weeks of agreement data exist; auto-approval stays off until it is very high.
+9. **M9 · Permission assist, shadow mode only.** ✅ Implemented: a Claude Code hook logs predictions and outcomes. Predictions logged, the user still decides. *Done when* several weeks of agreement data exist; auto-approval stays off until it is very high.
 10. **M10 · Dashboard.** The local dashboard from the mockup, the approvals inbox and the static HTML report.
 
 **Phase 4 · Distribution**

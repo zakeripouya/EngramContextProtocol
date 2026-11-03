@@ -213,6 +213,34 @@ var migrations = []string{
 	  summary   TEXT NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS trigger_events_by ON trigger_events(trigger, at);`,
+	// 8 (M9): permission assist, shadow mode.
+	`CREATE TABLE IF NOT EXISTS permits (
+	  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+	  at           TEXT NOT NULL,
+	  client       TEXT NOT NULL,
+	  session_id   TEXT NOT NULL,
+	  tool         TEXT NOT NULL,
+	  input_hash   TEXT NOT NULL,
+	  summary      TEXT NOT NULL,
+	  category     TEXT NOT NULL,
+	  tier         TEXT NOT NULL,
+	  predicted    TEXT NOT NULL,
+	  confidence   REAL NOT NULL,
+	  precedents   INTEGER NOT NULL,
+	  reason       TEXT NOT NULL,
+	  outcome      TEXT NOT NULL,
+	  objective    TEXT,
+	  resolved_at  TEXT,
+	  resolved_how TEXT
+	);
+	CREATE INDEX IF NOT EXISTS permits_match ON permits(client, session_id, tool, input_hash);
+	CREATE INDEX IF NOT EXISTS permits_category ON permits(client, category, outcome);
+	CREATE TABLE IF NOT EXISTS permit_activity (
+	  client     TEXT NOT NULL,
+	  session_id TEXT NOT NULL,
+	  at         TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS permit_activity_by ON permit_activity(client, session_id, at);`,
 }
 
 // Accepted values (spec, "Data types").
@@ -340,6 +368,9 @@ func Open(path string) (*Store, error) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return nil, err
 		}
+		// Several processes share the file (agents' servers, hooks, the trigger
+		// listener, jobs, the sleep cycle): wait for a lock instead of failing.
+		dsn = "file:" + path + "?_busy_timeout=5000"
 	}
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {

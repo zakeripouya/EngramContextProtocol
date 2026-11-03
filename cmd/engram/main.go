@@ -32,6 +32,7 @@ import (
 	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
 	"github.com/zakeripouya/EngramContextProtocol/internal/health"
 	"github.com/zakeripouya/EngramContextProtocol/internal/llm"
+	"github.com/zakeripouya/EngramContextProtocol/internal/permit"
 	"github.com/zakeripouya/EngramContextProtocol/internal/server"
 	"github.com/zakeripouya/EngramContextProtocol/internal/sleep"
 	"github.com/zakeripouya/EngramContextProtocol/internal/store"
@@ -76,6 +77,10 @@ Usage:
   engram job run NAME -- COMMAND [ARGS]   run an existing job unchanged and record its outcome
   engram job report NAME --status ok|failed [--summary TEXT]
                                           record the outcome of a job that ran elsewhere
+  engram hook claude-code                 Claude Code hook (permission assist, shadow mode); reads stdin
+  engram permit report [--json]           how often Engram's predictions matched your permission decisions
+  engram permit explain TOOL INPUT        show the tier and prediction for one tool call
+  engram permit on | off                  turn shadow logging on or off (kill switch)
   engram version                          print the version
 
 Database: $ENGRAM_DB, or ~/.engram/engram.db
@@ -330,6 +335,20 @@ func run(args []string) error {
 	case "job":
 		return runJob(st, rest)
 
+	case "hook":
+		// Shadow mode: never print a decision, never fail the host. Claude Code asks the
+		// user exactly as it would without Engram.
+		if len(rest) != 1 {
+			return nil
+		}
+		if _, err := permit.HandleHook(st, rest[0], os.Stdin); err != nil && os.Getenv("ENGRAM_DEBUG") != "" {
+			fmt.Fprintln(os.Stderr, "engram hook:", err)
+		}
+		return nil
+
+	case "permit":
+		return runPermit(st, rest)
+
 	case "health":
 		asJSON := len(rest) > 0 && rest[0] == "--json"
 		r, err := health.Check(st, lastDecisionRecall(st), false)
@@ -413,6 +432,13 @@ func setup(args []string) error {
 		fmt.Println("     engram pair claude-code --read me --write me")
 		fmt.Println("2. Connect it:")
 		fmt.Printf("     claude mcp add engram -- %s serve --client claude-code\n", exe)
+		fmt.Println("3. Optional: permission assist in shadow mode. Engram only watches and predicts; you still")
+		fmt.Println("   answer every prompt. Add to ~/.claude/settings.json, then run engram permit report after a while:")
+		hookCmd := exe + " hook claude-code"
+		entry := []map[string]any{{"matcher": "*", "hooks": []map[string]any{{"type": "command", "command": hookCmd, "timeout": 5}}}}
+		b, _ := json.MarshalIndent(map[string]any{"hooks": map[string]any{
+			"PermissionRequest": entry, "PostToolUse": entry, "PostToolUseFailure": entry}}, "     ", "  ")
+		fmt.Println("     " + string(b))
 	case "claude-desktop":
 		fmt.Println(`Add this to claude_desktop_config.json under "mcpServers":`)
 		fmt.Printf(`  "engram": {"command": %q, "args": ["serve", "--client", "claude-desktop"]}`+"\n", exe)
@@ -895,4 +921,80 @@ func runJob(st *store.Store, args []string) error {
 		return nil
 	}
 	return fmt.Errorf("usage: engram job run NAME -- COMMAND [ARGS] | engram job report NAME --status ok|failed [--summary TEXT]")
+}
+
+func runPermit(st *store.Store, args []string) error {
+	if len(args) == 0 {
+		args = []string{"report"}
+	}
+	switch args[0] {
+	case "on", "off":
+		v := "true"
+		if args[0] == "off" {
+			v = "false"
+		}
+		if err := st.SetSetting(permit.SettingEnabled, v); err != nil {
+			return err
+		}
+		fmt.Println("Permission assist logging is", args[0]+".")
+		return nil
+	case "explain":
+		if len(args) != 3 {
+			return fmt.Errorf(`usage: engram permit explain Bash "git push --force" | Edit path/to/file`)
+		}
+		tool, arg := args[1], args[2]
+		input := map[string]any{"file_path": arg}
+		switch tool {
+		case "Bash":
+			input = map[string]any{"command": arg}
+		case "Grep", "Glob":
+			input = map[string]any{"pattern": arg}
+		case "WebFetch":
+			input = map[string]any{"url": arg}
+		}
+		cwd, _ := os.Getwd()
+		p, err := permit.Predict(st, "claude-code", tool, input, cwd)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("tier:       %s\ncategory:   %s\nprediction: %s (confidence %.2f from %d precedents)\nwhy:        %s\n",
+			p.Tier, p.Category, p.Decision, p.Confidence, p.Precedents, p.Reason)
+		return nil
+	case "report":
+		rep, err := permit.BuildReport(st, 5000)
+		if err != nil {
+			return err
+		}
+		if len(args) > 1 && args[1] == "--json" {
+			b, _ := json.MarshalIndent(rep, "", "  ")
+			fmt.Println(string(b))
+			return nil
+		}
+		state := "on"
+		if !rep.Enabled {
+			state = "off"
+		}
+		fmt.Printf("Permission assist: shadow mode, logging %s. Engram never answers prompts in this version.\n", state)
+		fmt.Println("Rule:", rep.Threshold)
+		fmt.Println()
+		fmt.Printf("%-9s %8s %8s %8s %8s %10s %10s %10s\n", "tier", "requests", "approved", "denied", "allow", "precision", "wrong", "avoided")
+		for _, t := range rep.Tiers {
+			fmt.Printf("%-9s %8d %8d %8d %8d %10.3f %10d %9.0f%%\n", t.Tier, t.Requests, t.Approved, t.Denied,
+				t.PredictedAllow, t.Precision, t.AllowDenied, t.PromptsAvoided*100)
+		}
+		fmt.Println()
+		for _, t := range rep.Tiers {
+			if t.Tier == permit.Eligible {
+				fmt.Println("Ready for auto-approval:", t.ReadyForAuto, "-", t.ReadinessReason)
+			}
+		}
+		if len(rep.Mistakes) > 0 {
+			fmt.Println("\nWould have approved, but you denied:")
+			for _, m := range rep.Mistakes {
+				fmt.Printf("  %s  %s\n", m.At, m.Summary)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("usage: engram permit report [--json] | explain TOOL INPUT | on | off")
 }

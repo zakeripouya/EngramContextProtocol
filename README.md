@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) and M8 (triggers, push notifications and `attend`) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`) and M9 (permission assist in shadow mode) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
 
 ---
 
@@ -130,6 +130,10 @@ The scheduler calls `engram sleep run --if-due` every 15 minutes; it only works 
 | `engram listen [--addr 127.0.0.1:7077]` | Receive webhooks (`POST /hooks/NAME`) and job results (`POST /jobs/NAME`) |
 | `engram job run NAME -- COMMAND` | Run an existing job unchanged (output and exit code pass through) and record its outcome |
 | `engram job report NAME --status ok\|failed` | Record the outcome of a job that ran elsewhere |
+| `engram hook claude-code` | Claude Code hook for the permission assist (shadow mode); `engram setup claude-code` prints the settings |
+| `engram permit report [--json]` | Agreement between Engram's predictions and your permission decisions |
+| `engram permit explain TOOL INPUT` | Tier and prediction for one tool call, such as `Bash "git push"` |
+| `engram permit on` / `off` | Kill switch for permission logging |
 | `engram version` | Print the engine and protocol versions |
 
 The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file.
@@ -178,7 +182,8 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | Conflicts kept, not merged: `observe` with `contradicts`, surfaced by `attend` | ✅ M8 |
 | Triggers: generic webhooks (bearer token), GitHub webhooks (HMAC), job results; pause, rate limit, secret filter | ✅ M8 |
 | Push: `subscribe`, updates to the `engram://attention` resource, pending events in `attend` | ✅ M8 |
-| Permission assist (shadow mode) | design (M9) |
+| Permission assist, shadow mode: rule tiers, precedent-based predictions, outcome-aware confidence, agreement report | ✅ M9 |
+| Auto-approval | design (after shadow data shows very high agreement) |
 | Dashboard | design (M10) |
 
 ---
@@ -356,6 +361,13 @@ Engram can answer an agent's permission prompt when you'd clearly approve, so ro
 | Never auto | Deletes, force pushes, production deploys and migrations, secrets, payments, sending messages, new network hosts | Always ask |
 
 It starts in **shadow mode** (predict, but you still decide), falls back to asking for anything unusual or anything following web or email content, logs every auto-approval, and **defaults to deny** if Engram is unreachable.
+
+**Implemented in M9: shadow mode only.** A Claude Code hook (`PermissionRequest`, `PostToolUse`, `PostToolUseFailure`) logs every permission prompt with Engram's prediction and then learns what you decided. Engram never prints a decision, so Claude Code asks you exactly as before, and any error is swallowed.
+
+- **Tiers are rules, not a model.** *Eligible*: reading project files (not `.env`, keys or `.git`), editing files inside the project, and tests, builds, linters and read-only commands (`go test`, `pnpm run test`, `git status`, `rg`). Compound commands are split on `&&`, `;` and `|`, and every part must be eligible. *Never*: deletes, `git push`, history rewrites, `sudo`, network tools, publishing, deploys and migrations, infrastructure CLIs, secrets, writes or redirects outside the project, and web access. *Unknown* (always ask): anything else, including package installs, scripts, MCP tools and commands with `$(...)`, backticks or background jobs.
+- **Prediction.** Inside the eligible tier, precedents are counted per category (`Bash:go test`, `Edit:*.go`). Confidence is the posterior mean of approved runs that did not fail, `(approved − failed + 1) / (precedents + 2)`; "allow" needs at least 8 precedents and confidence ≥ 0.90, so a single failure or denial drops a category back to ask.
+- **What you decided.** Claude Code fires no hook when you deny a prompt, so a request counts as approved when the tool then runs, and as denied when the session moves on without running it (or after six hours). A late run corrects an inferred denial.
+- **Report.** `engram permit report` shows, per tier, how often Engram would have said allow, its precision, the requests it would have wrongly approved, and the share of prompts it would have saved. A tier is called ready for auto-approval only after 50 resolved allow predictions at precision ≥ 0.98; auto-approval itself is not built.
 
 ---
 
@@ -883,7 +895,7 @@ Each milestone is roughly one to two weekends and has a done-check.
 
 **Phase 3 · Awareness**
 8. **M8 · Triggers and push.**
-9. **M9 · Permission assist,** shadow mode only.
+9. **M9 · Permission assist** ✅ Shadow mode only.
 10. **M10 · Dashboard,** approvals inbox and static report.
 
 **Phase 4 · Distribution**

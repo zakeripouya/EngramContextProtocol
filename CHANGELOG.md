@@ -2,6 +2,22 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.9.0] - 2026-11-03
+
+Engine milestone M9: permission assist, shadow mode only.
+
+### Added
+
+- `engram hook claude-code`: a Claude Code hook for `PermissionRequest`, `PostToolUse` and `PostToolUseFailure` that logs each permission prompt with Engram's prediction, then the user's decision and the outcome. It never prints a decision and never fails the host. `engram setup claude-code` prints the settings.
+- Rule tiers (eligible, never, unknown) for Read, Edit, Write, Bash, web and MCP tools. Bash lines are split into simple commands, and every part must be eligible.
+- Predictions per category from precedents, with outcome-aware confidence: allow needs 8 precedents and ≥ 0.90.
+- Denials inferred when the session moves on without running the tool; a later run corrects them.
+- `engram permit report [--json]`, `engram permit explain TOOL INPUT`, `engram permit on | off`.
+
+### Changed
+
+- The database is opened with a 5-second busy timeout, since agents' servers, hooks, the trigger listener and jobs share it.
+
 ## [0.8.0] - 2026-11-03
 
 Engine milestone M8: triggers and push.
