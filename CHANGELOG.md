@@ -2,6 +2,17 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.13.1] - 2026-11-03
+
+### Added
+
+- Recall modifiers, off by default: reciprocal rank fusion (`+rrf`), additive spreading (`+additive`), bounded pathway boosts (`+boostN`), reserved places for pathway results (`+slotsN`). Configuration names combine them, for example `full+rrf+slots2`.
+- `engram bench --part tune|report` tunes on the even-numbered conversations and reports on the odd-numbered ones; a configuration name ending in `@episodes` runs on a store whose consecutive turns are linked.
+
+### Results
+
+- On LoCoMo with the hashing embedder, every modifier was significantly worse than the default on the tune half and on the report half (for example `+rrf` −0.018 and `+slots1` −0.011 Recall@10 on the report half), so the defaults are unchanged. See docs/evaluation.md.
+
 ## [0.13.0] - 2026-11-03
 
 Measuring Engram like an ML system, and learning from it.

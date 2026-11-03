@@ -486,7 +486,8 @@ func runBench(st *store.Store, args []string) error {
 	maxQ := fs.Int("max", 0, "stop after this many questions")
 	asJSON := fs.Bool("json", false, "print JSON")
 	adversarial := fs.Bool("adversarial", false, "LoCoMo: include adversarial questions (no answer in the conversation)")
-	if err := fs.Parse(reorderFlags(args, "k", "configs", "max")); err != nil {
+	part := fs.String("part", "all", "tune (even-numbered conversations), report (odd-numbered) or all: tune on one half, report the other")
+	if err := fs.Parse(reorderFlags(args, "k", "configs", "max", "part")); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -508,6 +509,13 @@ func runBench(st *store.Store, args []string) error {
 	}
 	if err != nil {
 		return err
+	}
+	samples, err = eval.Part(samples, *part)
+	if err != nil {
+		return err
+	}
+	if *part != "all" {
+		dataset += " (" + *part + ")"
 	}
 	o := eval.BenchOptions{K: *k, Configs: splitList(*configs), LinkTurns: *link, MaxQuestions: *maxQ, Embedder: st.Embedder()}
 	if *ablations {

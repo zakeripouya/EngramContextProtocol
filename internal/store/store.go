@@ -1242,6 +1242,40 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		scored[i] = cand{score: combine(rel, prior[i]), conf: conf, reason: reason, pathW: 1}
 	}
 
+	// Reciprocal rank fusion: relevance from each signal's rank rather than an
+	// average of their raw scores, rel = Σ 1/(60 + rank), normalized to 0..1.
+	if cfg.Fusion == "rrf" && len(scored) > 0 {
+		lists := 0
+		rrf := map[int]float64{}
+		for _, sig := range [][]float64{kwS, semS} {
+			var ranked []int
+			for i := range scored {
+				if sig[i] > 0 {
+					ranked = append(ranked, i)
+				}
+			}
+			if len(ranked) == 0 {
+				continue
+			}
+			lists++
+			sort.SliceStable(ranked, func(a, b int) bool {
+				if sig[ranked[a]] != sig[ranked[b]] {
+					return sig[ranked[a]] > sig[ranked[b]]
+				}
+				return mems[ranked[a]].ID < mems[ranked[b]].ID
+			})
+			for r, i := range ranked {
+				rrf[i] += 1 / float64(60+r+1)
+			}
+		}
+		if lists > 0 {
+			for i, c := range scored {
+				c.score = combine(rrf[i]/(float64(lists)/61), prior[i])
+				scored[i] = c
+			}
+		}
+	}
+
 	// Memories the user explicitly overrode are demoted, and say so.
 	if len(scored) > 0 && !cfg.NoOverride {
 		ids := make([]string, 0, len(scored))
@@ -1275,6 +1309,7 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		hops = 0
 	}
 	damping, beam := cfg.damping(), cfg.beam()
+	direct := map[int]float64{} // direct scores before any boost (SpreadBoost)
 	frontier := make([]int, 0, len(scored))
 	for i := range scored {
 		frontier = append(frontier, i)
@@ -1341,7 +1376,30 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 					continue
 				}
 				act := src.score * n.weight * damping / math.Sqrt(deg)
-				if cur, ok := scored[j]; ok && cur.score >= act {
+				if cfg.SpreadBoost > 0 {
+					// Pathways only strengthen memories that already match the question,
+					// by at most SpreadBoost of their own direct score: corroboration, not discovery.
+					if cur, ok := scored[j]; ok && len(cur.path) == 0 {
+						if direct[j] == 0 {
+							direct[j] = cur.score
+						}
+						cur.score = math.Min(cur.score+act, direct[j]*(1+cfg.SpreadBoost))
+						scored[j] = cur
+					}
+					continue
+				}
+				if cfg.SpreadAdditive {
+					// ACT-R style: activation from every source adds to what a memory already has.
+					if cur, ok := scored[j]; ok {
+						cur.score += act
+						cur.conf = math.Max(cur.conf, src.conf*n.weight)
+						if hop+1 < hops && act > 0.001 {
+							next = append(next, j)
+						}
+						scored[j] = cur
+						continue
+					}
+				} else if cur, ok := scored[j]; ok && cur.score >= act {
 					continue
 				}
 				path := append(append([]string{}, src.path...), n.id)
@@ -1398,6 +1456,41 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		}
 		return mems[order[a]].ID < mems[order[b]].ID
 	})
+	// Reserved slots: the last PathSlots places go to memories reached through a
+	// pathway, when there are any, so spreading can surface what direct matching misses.
+	if n := min(cfg.PathSlots, in.K-1); n > 0 && len(order) > in.K {
+		head := in.K - n
+		var direct, viaPath []int
+		for _, i := range order {
+			if len(scored[i].path) > 0 {
+				viaPath = append(viaPath, i)
+			} else {
+				direct = append(direct, i)
+			}
+		}
+		var reordered []int
+		taken := map[int]bool{}
+		for _, i := range order { // the best results keep their places
+			if len(reordered) == head {
+				break
+			}
+			reordered, taken[i] = append(reordered, i), true
+		}
+		for _, i := range viaPath {
+			if len(reordered) == in.K {
+				break
+			}
+			if !taken[i] {
+				reordered, taken[i] = append(reordered, i), true
+			}
+		}
+		for _, i := range append(direct, viaPath...) {
+			if !taken[i] {
+				reordered, taken[i] = append(reordered, i), true
+			}
+		}
+		order = reordered
+	}
 	// Lateral inhibition: a near-duplicate of a better result is suppressed.
 	results := make([]Scored, 0, in.K)
 	var kept []int

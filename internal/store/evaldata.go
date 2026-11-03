@@ -22,21 +22,26 @@ import (
 // RecallConfig switches recall's mechanisms and sets its constants. The zero
 // value is the full engine with the hand-set constants.
 type RecallConfig struct {
-	Name         string  `json:"name,omitempty"`
-	NoKeyword    bool    `json:"noKeyword,omitempty"`    // ignore BM25
-	NoSemantic   bool    `json:"noSemantic,omitempty"`   // ignore embeddings
-	NoPrior      bool    `json:"noPrior,omitempty"`      // rank by relevance only, not strength and use
-	NoSpreading  bool    `json:"noSpreading,omitempty"`  // direct matches only
-	NoHebbian    bool    `json:"noHebbian,omitempty"`    // spread without coactive (learned) pathways
-	NoInhibition bool    `json:"noInhibition,omitempty"` // keep near-duplicates
-	NoOverride   bool    `json:"noOverride,omitempty"`   // don't demote memories the user overrode
-	SpreadAbout  bool    `json:"spreadAbout,omitempty"`  // also spread along "about" edges (concepts, docs, files)
-	RelWeight    float64 `json:"relWeight,omitempty"`    // relevance vs prior; default 0.75
-	Damping      float64 `json:"damping,omitempty"`      // per-hop damping; default 0.9
-	Beam         int     `json:"beam,omitempty"`         // activations spread per hop; default 10
-	Ranker       string  `json:"ranker,omitempty"`       // a model id; "" = the hand-set formula, "active" = the active ranker
-	Calibrator   string  `json:"calibrator,omitempty"`   // a model id, "active", or "" for none
-	NoModels     bool    `json:"noModels,omitempty"`     // ignore active models (the hand-set baseline)
+	Name         string `json:"name,omitempty"`
+	NoKeyword    bool   `json:"noKeyword,omitempty"`    // ignore BM25
+	NoSemantic   bool   `json:"noSemantic,omitempty"`   // ignore embeddings
+	NoPrior      bool   `json:"noPrior,omitempty"`      // rank by relevance only, not strength and use
+	NoSpreading  bool   `json:"noSpreading,omitempty"`  // direct matches only
+	NoHebbian    bool   `json:"noHebbian,omitempty"`    // spread without coactive (learned) pathways
+	NoInhibition bool   `json:"noInhibition,omitempty"` // keep near-duplicates
+	NoOverride   bool   `json:"noOverride,omitempty"`   // don't demote memories the user overrode
+	SpreadAbout  bool   `json:"spreadAbout,omitempty"`  // also spread along "about" edges (concepts, docs, files)
+	// Candidate improvements, off by default until measured.
+	Fusion         string  `json:"fusion,omitempty"`         // "" averages keyword and meaning scores; "rrf" fuses their ranks
+	SpreadAdditive bool    `json:"spreadAdditive,omitempty"` // spreading adds to a memory's activation instead of replacing a lower one
+	PathSlots      int     `json:"pathSlots,omitempty"`      // places in the top k reserved for memories reached through pathways
+	SpreadBoost    float64 `json:"spreadBoost,omitempty"`    // pathways only boost direct matches, by up to this share of their score
+	RelWeight      float64 `json:"relWeight,omitempty"`      // relevance vs prior; default 0.75
+	Damping        float64 `json:"damping,omitempty"`        // per-hop damping; default 0.9
+	Beam           int     `json:"beam,omitempty"`           // activations spread per hop; default 10
+	Ranker         string  `json:"ranker,omitempty"`         // a model id; "" = the hand-set formula, "active" = the active ranker
+	Calibrator     string  `json:"calibrator,omitempty"`     // a model id, "active", or "" for none
+	NoModels       bool    `json:"noModels,omitempty"`       // ignore active models (the hand-set baseline)
 }
 
 func (c RecallConfig) relWeight() float64 {
@@ -60,8 +65,45 @@ func (c RecallConfig) beam() int {
 	return 10
 }
 
-// Baselines and ablations, by name, for evaluation and experiments.
+// Baselines and ablations, by name, for evaluation and experiments. A name can
+// add modifiers with "+": "full+rrf+additive+slots2".
 func NamedConfig(name string) (RecallConfig, error) {
+	if base, mods, ok := strings.Cut(name, "+"); ok {
+		c, err := NamedConfig(base)
+		if err != nil {
+			return c, err
+		}
+		for _, m := range strings.Split(mods, "+") {
+			switch {
+			case m == "rrf":
+				c.Fusion = "rrf"
+			case m == "additive":
+				c.SpreadAdditive = true
+			case m == "about":
+				c.SpreadAbout = true
+			case strings.HasPrefix(m, "boost"):
+				pct := 25
+				if v := strings.TrimPrefix(m, "boost"); v != "" {
+					if _, err := fmt.Sscan(v, &pct); err != nil || pct < 1 || pct > 100 {
+						return c, fmt.Errorf("bad modifier %q (boost1 to boost100, a percentage)", m)
+					}
+				}
+				c.SpreadBoost = float64(pct) / 100
+			case strings.HasPrefix(m, "slots"):
+				n := 2
+				if v := strings.TrimPrefix(m, "slots"); v != "" {
+					if _, err := fmt.Sscan(v, &n); err != nil || n < 1 || n > 10 {
+						return c, fmt.Errorf("bad modifier %q (slots1 to slots10)", m)
+					}
+				}
+				c.PathSlots = n
+			default:
+				return c, fmt.Errorf("unknown modifier %q (rrf, additive, about, boostN, slotsN)", m)
+			}
+		}
+		c.Name = name
+		return c, nil
+	}
 	c := RecallConfig{Name: name}
 	switch name {
 	case "full", "":
@@ -103,7 +145,7 @@ var Baselines = []string{"bm25", "embeddings", "hybrid"}
 var Ablations = []string{"no-keyword", "no-semantic", "no-prior", "no-spreading", "no-hebbian", "no-inhibition", "no-override"}
 
 // Additions are candidate mechanisms that are off by default until measured.
-var Additions = []string{"with-about"}
+var Additions = []string{"with-about", "full+rrf", "full+additive", "full+slots2", "full+rrf+additive+slots2"}
 
 // ---- recall log ----
 

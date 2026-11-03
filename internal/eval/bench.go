@@ -232,6 +232,24 @@ func parseLMETime(s string) time.Time {
 	return time.Time{}
 }
 
+// Part splits samples so choices can be tuned on one half and reported on the
+// other: "tune" keeps even-numbered samples, "report" odd-numbered, "all" both.
+func Part(samples []BenchSample, part string) ([]BenchSample, error) {
+	switch part {
+	case "", "all":
+		return samples, nil
+	case "tune", "report":
+		var out []BenchSample
+		for i, s := range samples {
+			if (i%2 == 0) == (part == "tune") {
+				out = append(out, s)
+			}
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("--part must be tune, report or all, not %q", part)
+}
+
 // BenchOptions controls RunBench.
 type BenchOptions struct {
 	K            int      // results per question; default 10
@@ -305,18 +323,22 @@ func RunBench(ctx context.Context, dataset string, samples []BenchSample, o Benc
 		linked bool
 	}
 	var systems []sys
+	needLinked := false
 	for _, name := range o.Configs {
-		cfg, err := store.NamedConfig(name)
+		base, linked := strings.CutSuffix(name, "@episodes") // run on the store with consecutive turns linked
+		cfg, err := store.NamedConfig(base)
 		if err != nil {
 			return rep, err
 		}
 		cfg.NoModels = true // public benchmarks measure the mechanisms, not models trained on your data
-		systems = append(systems, sys{name, cfg, false})
+		systems = append(systems, sys{name, cfg, linked})
+		needLinked = needLinked || linked
 	}
 	if o.LinkTurns {
 		cfg, _ := store.NamedConfig("full")
 		cfg.NoModels = true
-		systems = append(systems, sys{"full+episodes", cfg, true})
+		systems = append(systems, sys{"full@episodes", cfg, true})
+		needLinked = true
 	}
 	qaSet := map[string]bool{}
 	if o.Chat != nil {
@@ -383,7 +405,7 @@ func RunBench(ctx context.Context, dataset string, samples []BenchSample, o Benc
 		if err := build(false); err != nil {
 			return rep, err
 		}
-		if o.LinkTurns {
+		if needLinked {
 			if err := build(true); err != nil {
 				return rep, err
 			}

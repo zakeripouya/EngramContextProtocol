@@ -186,7 +186,7 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 
 - [x] LoCoMo and LongMemEval runners with retrieval metrics, context tokens and an LLM judge (`engram bench`, 0.13.0). `M12` `M`
 - [ ] Run them with a real embedding model and chat judge, and against Mem0, Zep and HeLa-Mem. First LoCoMo run (hashing embedder): Engram Recall@10 0.558 vs BM25 0.560, see [evaluation](evaluation.md). `M12` `L`
-- [ ] Spreading activation never reaches the top 10 on LoCoMo: pathway results are always ranked below direct matches. Try reserved slots for pathway results, per-hop normalization, or letting a learned ranker decide; measure with `engram bench --ablations`. `research` `M`
+- [ ] Spreading activation never reaches the top 10 on LoCoMo. Tried in 0.13.1 and all significantly worse on a cold store with hashing-embedder edges: additive activation, bounded boosts, reserved slots, RRF (see [evaluation](evaluation.md)). Retest with a real embedding model and with pathways learned from use; next ideas are spreading only along `coactive` edges with a minimum weight, and letting a learned ranker weigh pathway features. `research` `M`
 - [ ] Decide whether `about` edges should spread (the `with-about` configuration); no measurable effect so far. `polish` `S`
 - [ ] Held-out decision prediction: top-1 and top-3 accuracy on hidden real decisions vs. text-note memory and kNN without Hebbian edges. `M12` `L`
 - [ ] Cross-agent transfer: task success and re-explanation turns vs. isolated per-agent memory. `M12` `M`

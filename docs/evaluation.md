@@ -137,6 +137,36 @@ What this says:
   chat model for answer accuracy, before they are compared with published
   results for Mem0, Zep or others.
 
+### Tuning attempts: fusion and spreading (0.13.1)
+
+To make spreading reach the top 10 and to fuse keyword and meaning better, four
+switchable changes were added, tuned on the even-numbered LoCoMo conversations
+(`--part tune`, 786 questions) and checked on the odd-numbered ones
+(`--part report`, 750 questions). Same setup: hashing embedder, k = 10.
+
+| Change | Name | Recall@10 change vs full (tune) | Report half |
+| --- | --- | --- | --- |
+| Reciprocal rank fusion of keyword and meaning ranks | `full+rrf` | −0.017 [−0.03, −0.01] | −0.018 |
+| Spreading adds activation from every source (ACT-R style) | `full+additive` | −0.292 [−0.33, −0.26] | not run |
+| Pathways only boost direct matches, by at most 10% | `full+boost10` | −0.128 [−0.15, −0.10] | −0.098 |
+| One of the 10 places reserved for a pathway result | `full+slots1` | −0.013 [−0.02, −0.01] | −0.011 |
+| Two places reserved | `full+slots2` | −0.020 [−0.03, −0.01] | not run |
+| Additive spreading over turns linked as episodes | `full+additive@episodes` | −0.193 [−0.22, −0.16] | not run |
+
+Every change was significantly worse, so none is on by default; they stay
+available as modifiers (`+rrf`, `+additive`, `+boostN`, `+slotsN`, `@episodes`)
+to retest. Two reasons, both about this setup rather than final verdicts:
+
+- With the hashing embedder, the "meaning" ranking is close to noise, so giving
+  it an equal vote (RRF) hurts. RRF needs a rerun with a real embedding model.
+- The pathway graph here is built by the same hashing embedder, so `similar`
+  edges link turns that share words. Being well connected to the top hits is
+  then not evidence of relevance, and anything that rewards connectivity
+  reorders results by the wrong thing. Spreading needs meaning-based edges or
+  pathways learned from use, which a cold benchmark does not have. The current
+  design, where pathway results rank below direct matches, is the least harmful
+  choice on this data.
+
 Where Engram is meant to win is learning from use: a store that has seen your
 feedback, measured with `engram eval` on your own queries. On a simulated user
 (the tests in `internal/eval`), a ranker trained on 21 days of feedback beat the
