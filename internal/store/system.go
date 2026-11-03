@@ -115,3 +115,16 @@ func (s *Store) KeyExists(key string) (bool, error) {
 	err := s.db.QueryRow(`SELECT count(*) FROM import_keys WHERE key = ?`, key).Scan(&n)
 	return n > 0, err
 }
+
+// AddEdgeIfAbsent adds an edge only when none of that kind exists between the two
+// memories, so re-running an import never resets a weight that use has changed.
+func (s *Store) AddEdgeIfAbsent(src, dst, kind string, weight float64) (bool, error) {
+	weight = max(0, min(1, weight))
+	res, err := s.db.Exec(`INSERT INTO edges(src, dst, kind, weight) VALUES (?,?,?,?) ON CONFLICT(src, dst, kind) DO NOTHING`,
+		src, dst, kind, weight)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}

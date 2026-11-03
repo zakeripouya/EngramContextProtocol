@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`), M9 (permission assist in shadow mode), M10 (the local dashboard, approvals inbox and static report) and M11 (native ECP over stdio and HTTP, the conformance suite, SDKs, `engram init`, releases, Docker and the signed pack registry) are implemented and tested. Everything marked *design* below is specified but not built yet; the [backlog](docs/backlog.md) tracks every remaining item. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`), M9 (permission assist in shadow mode), M10 (the local dashboard, approvals inbox and static report) and M11 (native ECP over stdio and HTTP, the conformance suite, SDKs, `engram init`, releases, Docker and the signed pack registry) are implemented and tested, plus project absorption and the interactive setup (0.12.0). Everything marked *design* below is specified but not built yet; the [backlog](docs/backlog.md) tracks every remaining item. See the [roadmap](#roadmap).
 
 ---
 
@@ -61,11 +61,15 @@ curl -fsSL https://raw.githubusercontent.com/zakeripouya/EngramContextProtocol/m
 go install github.com/zakeripouya/EngramContextProtocol/cmd/engram@latest
 
 # Set everything up: models, agents (Claude Code, Claude Desktop, Codex, Cursor),
-# sleep hours and scheduler, the Developer pack and this repo's history.
+# your projects, sleep hours and scheduler, and the Developer pack.
 engram init
 ```
 
-`engram init` asks before each step (`--yes` accepts the recommended ones). It edits agents' MCP configs idempotently, with backups, and pairs them, because pairing is always your decision, never an agent's. To do it by hand instead:
+In a terminal, `engram init` is a full-screen setup: it checks your models, lets you pick which agents to connect, scans the folder around your current repository for projects (press `/` to scan another, `e` to rename a namespace), shows what each project would contribute, and only stores anything after a review screen. Each project you pick is **absorbed**: its git history, the instructions you already give agents (`CLAUDE.md`, `AGENTS.md`, Cursor rules, Copilot instructions), its README and docs (split at headings, linked to the files they mention), and its stack (languages and frameworks from manifests). Everything is read from files git tracks, so `.gitignore` is respected, and anything that looks like a secret is skipped.
+
+`--plain` uses yes/no prompts instead, and `--yes` accepts every recommended choice (for scripts). `engram init --dry-run --json` prints the plan without changing anything, so an agent can drive setup: read the plan, ask you, then run it. Absorb more projects later with `engram absorb ~/code` (or one repository with `--ns NAME`); running it again adds new commits, updates edited sections and retires removed ones, and never resets what use has learned.
+
+Setup edits agents' MCP configs idempotently, with backups, and pairs them, because pairing is always your decision, never an agent's. To do it by hand instead:
 
 ```bash
 engram pair claude-code --read me --write me                      # you approve the agent
@@ -108,7 +112,8 @@ The scheduler calls `engram sleep run --if-due` every 15 minutes; it only works 
 
 | Command | What it does |
 | --- | --- |
-| `engram init [--yes]` | Set up models, agents, sleep hours, scheduler and starting knowledge |
+| `engram init [--scan DIR] [--plain\|--yes] [--dry-run --json]` | Set up models, agents, projects, sleep hours, scheduler and starting knowledge (full-screen in a terminal) |
+| `engram absorb [DIR\|REPO ...] [--ns NS] [--dry-run] [--json]` | Absorb projects: git history, agent rules, docs and stack; re-runs add only what changed |
 | `engram serve [--client NAME]` | Serve over stdio: MCP, or native ECP when the client's first message is an ECP `initialize` |
 | `engram serve --http 127.0.0.1:7079` | Serve native ECP at `/ecp` and MCP at `/mcp` over HTTP, with bearer tokens |
 | `engram token create CLIENT [--service]` / `list` / `revoke` | Issue and revoke HTTP tokens; service tokens write as `system` |
@@ -445,6 +450,7 @@ Every mechanism is a switchable module, phased in and kept only if an ablation s
 
   An agent that called `subscribe` ("working on the payouts job") gets an update to `engram://attention` carrying the failed run, the related ticket and the user's decision about retries. Clients without resource subscriptions see the same events under `pending` the next time they call `attend`.
 - **Headless and multi-model**: any program that speaks ECP or MCP is a client (a Go service, a cron job, CI, an agent on any model). The core needs no LLM; the LLM steps use a pluggable provider, including local models.
+- **Absorbing projects** *(✅ 0.12.0)*: `engram init` and `engram absorb` find your repositories and absorb their history, agent rules files, docs (split at headings, linked to the files they mention and to a concept per document and per repository) and stack. Rules files start a little stronger than other imports (0.4 against 0.3), still below what you say yourself.
 - **Bootstrapping** *(✅ M3)*: import git history (one episode per commit, a concept per recurring file, `coactive` pathways between files that change together, and facts for detected naming conventions), Jira exports and generic JSON at low initial weight and `system` provenance, so Engram starts out knowing something. Imports are idempotent.
 
 ---

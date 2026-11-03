@@ -49,7 +49,10 @@ import (
 const usage = `engram: shared memory for AI agents (ECP %s reference server, v%s)
 
 Usage:
-  engram init [--yes]                     set up Engram: models, agents, sleep hours, scheduler, starting knowledge
+  engram init [--scan DIR] [--plain|--yes] [--dry-run --json]
+                                          set up Engram: models, agents, projects, sleep hours; full-screen in a terminal
+  engram absorb [DIR|REPO ...] [--ns NS] [--dry-run] [--json]
+                                          absorb projects: git history, agent rules (CLAUDE.md, AGENTS.md, Cursor), docs, stack
   engram serve [--client NAME]            serve over stdio (MCP, or native ECP when the client speaks it)
   engram pair NAME --read NS --write NS   approve a client; namespaces are comma-separated
   engram clients                          list paired clients and their grants
@@ -182,7 +185,7 @@ func run(args []string) error {
 		return err
 	}
 	defer st.Close()
-	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "pack" || cmd == "sleep" || cmd == "selftest" || cmd == "listen" || cmd == "job" {
+	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "absorb" || cmd == "pack" || cmd == "sleep" || cmd == "selftest" || cmd == "listen" || cmd == "job" {
 		e, note := embed.New(context.Background(), embed.FromEnv())
 		st.SetEmbedder(e)
 		fmt.Fprintln(os.Stderr, "engram:", note) // stderr: stdout carries the MCP protocol
@@ -324,6 +327,9 @@ func run(args []string) error {
 
 	case "import":
 		return runImport(st, rest)
+
+	case "absorb":
+		return runAbsorb(st, rest)
 
 	case "pack":
 		return runPack(st, rest)

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -13,10 +14,7 @@ import (
 	"strings"
 
 	"github.com/zakeripouya/EngramContextProtocol/internal/bootstrap"
-	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
 	"github.com/zakeripouya/EngramContextProtocol/internal/hosts"
-	"github.com/zakeripouya/EngramContextProtocol/internal/llm"
-	"github.com/zakeripouya/EngramContextProtocol/internal/sleep"
 	"github.com/zakeripouya/EngramContextProtocol/internal/store"
 )
 
@@ -112,10 +110,16 @@ func (p *prompter) text(question, def string) string {
 func runInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "accept the recommended choice at every step, without prompts")
+	plain := fs.Bool("plain", false, "use plain yes/no prompts instead of the full-screen setup")
+	scan := fs.String("scan", "", "find projects under this folder and offer to absorb them (default: around the current repo)")
+	dryRun := fs.Bool("dry-run", false, "show what setup would do (agents, models, projects) and change nothing")
+	asJSON := fs.Bool("json", false, "with --dry-run: print the plan as JSON, for agents driving setup")
+	since := fs.String("since", "", "only absorb history since, e.g. \"1 year ago\"")
+	maxCommits := fs.Int("max-commits", 2000, "newest commits to absorb per project")
 	sleepHours := fs.String("sleep-hours", "01:00-07:00", "when the nightly cycle may run")
 	noAgents := fs.Bool("no-agents", false, "don't connect agent hosts")
 	noSchedule := fs.Bool("no-schedule", false, "don't install the nightly scheduler (cron or launchd)")
-	noImport := fs.Bool("no-import", false, "don't import the current git repository")
+	noImport := fs.Bool("no-import", false, "don't absorb any projects")
 	hooks := fs.Bool("permission-hooks", false, "install the Claude Code permission-assist hooks (shadow mode)")
 	embedURL := fs.String("embed-url", "", "an OpenAI-compatible embeddings server to save in the config")
 	embedModel := fs.String("embed-model", "", "embedding model name to save in the config")
@@ -124,8 +128,9 @@ func runInit(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	stat, _ := os.Stdin.Stat()
-	p := &prompter{yes: *yes, interactive: stat != nil && stat.Mode()&os.ModeCharDevice != 0, in: bufio.NewReader(os.Stdin)}
+	ctx := context.Background()
+	absorbOpts := bootstrap.AbsorbOptions{Since: *since, MaxCommits: *maxCommits}
+	home, _ := os.UserHomeDir()
 	exe, err := os.Executable()
 	if err != nil {
 		exe = "engram"
@@ -133,30 +138,24 @@ func runInit(args []string) error {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	step := func(n int, title string) { fmt.Printf("\n%d. %s\n", n, title) }
-
-	fmt.Println("Setting up Engram. Every step can be redone later; nothing is sent anywhere.")
-
-	// 1. Database and settings.
-	step(1, "Database")
-	st, err := store.Open(dbPath())
-	if err != nil {
-		return err
+	scanRoot := *scan
+	if scanRoot == "" {
+		scanRoot = defaultScanRoot()
 	}
-	defer st.Close()
-	fmt.Println("   ", dbPath())
+
+	if *dryRun {
+		return initDryRun(ctx, home, scanRoot, *scan != "" || !*noImport, *asJSON, absorbOpts)
+	}
+
 	cfg := map[string]string{}
-	if *embedURL != "" {
-		cfg["ENGRAM_EMBED_URL"] = *embedURL
+	for k, v := range map[string]string{"ENGRAM_EMBED_URL": *embedURL, "ENGRAM_EMBED_MODEL": *embedModel,
+		"ENGRAM_LLM_URL": *llmURL, "ENGRAM_LLM_MODEL": *llmModel} {
+		if v != "" {
+			cfg[k] = v
+		}
 	}
-	if *embedModel != "" {
-		cfg["ENGRAM_EMBED_MODEL"] = *embedModel
-	}
-	if *llmURL != "" {
-		cfg["ENGRAM_LLM_URL"] = *llmURL
-	}
-	if *llmModel != "" {
-		cfg["ENGRAM_LLM_MODEL"] = *llmModel
+	if err := os.MkdirAll(filepath.Dir(dbPath()), 0o700); err != nil {
+		return err
 	}
 	if len(cfg) > 0 {
 		if err := saveConfig(cfg); err != nil {
@@ -165,127 +164,214 @@ func runInit(args []string) error {
 		for k, v := range cfg {
 			_ = os.Setenv(k, v)
 		}
-		fmt.Println("    settings saved to", configPath())
 	}
-
-	// 2. Models.
-	step(2, "Models")
-	emb, note := embed.New(context.Background(), embed.FromEnv())
-	fmt.Println("    embeddings:", note)
-	if _, hashing := emb.(*embed.Hashing); hashing {
-		fmt.Println("    For recall by meaning, run an embedding server, for example:")
-		fmt.Println("      ollama pull nomic-embed-text   (https://ollama.com), then: engram reembed")
-	}
-	st.SetEmbedder(emb)
-	if chat, note := llm.New(context.Background(), llm.FromEnv()); chat != nil {
-		fmt.Println("    sleep-cycle model:", note)
-	} else {
-		fmt.Println("    sleep-cycle model:", note, "(distillation is skipped until one answers; for example: ollama pull llama3.2)")
-	}
-
-	// 3. Agents.
-	step(3, "Agents")
-	home, _ := os.UserHomeDir()
-	var connected []string
-	if *noAgents {
-		fmt.Println("    skipped (--no-agents)")
-	} else {
-		found := 0
-		for _, h := range hosts.Detect(home) {
-			if !h.Found {
-				continue
-			}
-			found++
-			if !p.ask(fmt.Sprintf("    Connect %s and let it read and write your personal memory?", h.Title), true) {
-				continue
-			}
-			msg, err := hosts.Connect(h, exe)
-			if err != nil {
-				fmt.Printf("    %s: %v\n", h.Title, err)
-				continue
-			}
-			if err := st.Pair(h.Name, []string{"me"}, []string{"me"}, ""); err != nil {
-				return err
-			}
-			connected = append(connected, h.Name)
-			fmt.Printf("    %s; paired %s with read and write on me\n", msg, h.Name)
-		}
-		if found == 0 {
-			fmt.Println("    No agent hosts found. Later: engram setup claude-code | claude-desktop | codex | cursor")
-		}
-	}
-
-	// 4. Sleep hours and scheduler.
-	step(4, "Sleep cycle")
-	window := p.text("    Sleep hours (local time) when Engram may reorganize itself", *sleepHours)
-	h, err := sleep.ParseHours(window, "")
+	st, err := store.Open(dbPath())
 	if err != nil {
 		return err
 	}
-	if err := sleep.SaveHours(st, h); err != nil {
+	defer st.Close()
+
+	if !*yes && !*plain && isTerminal(os.Stdin) && isTerminal(os.Stdout) && !*noAgents && !*noImport {
+		_, err := runTUI(ctx, st, exe, home, scanRoot, *sleepHours, *hooks, absorbOpts)
 		return err
 	}
-	fmt.Println("    sleep hours:", h.String())
-	if *noSchedule {
-		fmt.Println("    scheduler skipped (--no-schedule); see: engram sleep schedule")
-	} else if p.ask("    Install a scheduler that runs the cycle when it is due?", true) {
-		msg, err := installScheduler(exe)
-		if err != nil {
-			fmt.Println("    could not install it:", err, "(see: engram sleep schedule)")
-		} else {
-			fmt.Println("   ", msg)
+	return plainInit(ctx, st, exe, home, plainOptions{yes: *yes, scan: *scan, noAgents: *noAgents, noSchedule: *noSchedule,
+		noImport: *noImport, hooks: *hooks, sleepHours: *sleepHours, configSaved: len(cfg) > 0, absorb: absorbOpts})
+}
+
+func isTerminal(f *os.File) bool {
+	stat, err := f.Stat()
+	return err == nil && stat.Mode()&os.ModeCharDevice != 0
+}
+
+func homeDir() string {
+	h, _ := os.UserHomeDir()
+	return h
+}
+
+// initDryRun prints what setup would do without creating or changing anything.
+func initDryRun(ctx context.Context, home, scanRoot string, withProjects, asJSON bool, o bootstrap.AbsorbOptions) error {
+	var st *store.Store
+	if _, err := os.Stat(dbPath()); err == nil {
+		if s, err := store.Open(dbPath()); err == nil {
+			st = s
+			defer st.Close()
 		}
 	}
-
-	// 5. Starting knowledge.
-	step(5, "Starting knowledge")
-	if _, err := bootstrap.LoadPack("developer"); err == nil && p.ask("    Install the Developer pack (branches, PRs, tickets, CI and how they connect)?", true) {
-		pk, _ := bootstrap.LoadPack("developer")
-		res, err := bootstrap.InstallPack(st, pk)
+	models := detectModels(ctx)
+	type hostOut struct {
+		Name  string `json:"name"`
+		Title string `json:"title"`
+		Found bool   `json:"installed"`
+	}
+	out := struct {
+		Database string               `json:"database"`
+		Exists   bool                 `json:"databaseExists"`
+		Models   modelInfo            `json:"models"`
+		Hosts    []hostOut            `json:"agents"`
+		ScanRoot string               `json:"scanRoot"`
+		Repos    []bootstrap.RepoPlan `json:"projects"`
+		Selected []string             `json:"preselected"`
+		Next     string               `json:"next"`
+	}{Database: dbPath(), Exists: st != nil, Models: models, ScanRoot: scanRoot, Repos: []bootstrap.RepoPlan{}, Selected: []string{}}
+	for _, h := range hosts.Detect(home) {
+		out.Hosts = append(out.Hosts, hostOut{h.Name, h.Title, h.Found})
+	}
+	if withProjects {
+		repos, err := bootstrap.FindRepos(scanRoot, 4)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("    installed %d memories and %d pathways into %s\n", res.Memories, res.Edges, res.Namespace)
-		for _, c := range connected {
-			if err := st.Pair(c, []string{res.Namespace}, nil, ""); err != nil {
+		out.Repos = bootstrap.PlanRepos(ctx, st, repos, o)
+		for _, p := range out.Repos {
+			if recentlyActive(p) {
+				out.Selected = append(out.Selected, p.Path)
+			}
+		}
+	}
+	out.Next = "engram init --yes --no-import, then engram absorb PATH [--ns NAME] for each project to keep"
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	fmt.Println("Dry run: nothing is created or changed.")
+	fmt.Printf("\nDatabase     %s", tildePath(out.Database))
+	if !out.Exists {
+		fmt.Print(" (would be created)")
+	}
+	fmt.Printf("\nEmbeddings   %s\nSleep model  %s\n\nAgents\n", models.Embeddings, models.Chat)
+	for _, h := range out.Hosts {
+		state := "not installed"
+		if h.Found {
+			state = "would connect"
+		}
+		fmt.Printf("  %-15s %s\n", h.Title, state)
+	}
+	if withProjects {
+		fmt.Printf("\nProjects under %s\n", tildePath(scanRoot))
+		if len(out.Repos) == 0 {
+			fmt.Println("  none found")
+		}
+		for _, p := range out.Repos {
+			mark := " "
+			if recentlyActive(p) {
+				mark = "*"
+			}
+			fmt.Printf(" %s %-24s → %-24s %5d commits  %3d docs  %s\n", mark, truncate(p.Name, 24), truncate(p.Namespace, 24),
+				p.Commits, len(p.Rules)+len(p.Docs), strings.Join(p.Stack, ", "))
+		}
+		fmt.Println("  (* = active in the last year, selected by default)")
+	}
+	return nil
+}
+
+type plainOptions struct {
+	yes, noAgents, noSchedule, noImport, hooks, configSaved bool
+	scan, sleepHours                                        string
+	absorb                                                  bootstrap.AbsorbOptions
+}
+
+// plainInit is setup as numbered yes/no questions, for scripts, --yes, --plain
+// and terminals the full-screen setup can't use.
+func plainInit(ctx context.Context, st *store.Store, exe, home string, o plainOptions) error {
+	p := &prompter{yes: o.yes, interactive: isTerminal(os.Stdin), in: bufio.NewReader(os.Stdin)}
+	fmt.Println("Setting up Engram. Every step can be redone later; nothing is sent anywhere.")
+	fmt.Println("\nDatabase\n   ", dbPath())
+	if o.configSaved {
+		fmt.Println("    settings saved to", configPath())
+	}
+	fmt.Println("\nModels")
+	models := detectModels(ctx)
+	fmt.Println("    embeddings:", models.Embeddings)
+	if models.Hashing {
+		fmt.Println("    For recall by meaning, run an embedding server, for example:")
+		fmt.Println("      ollama pull nomic-embed-text   (https://ollama.com), then: engram reembed")
+	}
+	st.SetEmbedder(models.embedder)
+	if models.ChatOK {
+		fmt.Println("    sleep-cycle model:", models.Chat)
+	} else {
+		fmt.Println("    sleep-cycle model:", models.Chat, "(distillation is skipped until one answers; for example: ollama pull llama3.2)")
+	}
+
+	ch := setupChoices{SleepHours: o.sleepHours, Absorb: o.absorb}
+	fmt.Println("\nChoices")
+	if !o.noAgents {
+		for _, h := range hosts.Detect(home) {
+			if h.Found && p.ask(fmt.Sprintf("    Connect %s and let it read and write your personal memory?", h.Title), true) {
+				ch.Hosts = append(ch.Hosts, h)
+			}
+		}
+	}
+	ch.SleepHours = p.text("    Sleep hours (local time) when Engram may reorganize itself", o.sleepHours)
+	ch.Scheduler = !o.noSchedule && p.ask("    Install a scheduler that runs the cycle when it is due?", true)
+	if _, err := bootstrap.LoadPack("developer"); err == nil {
+		ch.DeveloperPack = p.ask("    Install the Developer pack (branches, PRs, tickets, CI and how they connect)?", true)
+	}
+	if !o.noImport {
+		var plans []bootstrap.RepoPlan
+		if o.scan != "" {
+			repos, err := bootstrap.FindRepos(o.scan, 4)
+			if err != nil {
 				return err
 			}
+			plans = bootstrap.PlanRepos(ctx, st, repos, o.absorb)
+			fmt.Printf("    found %d projects under %s\n", len(plans), tildePath(o.scan))
+		} else if out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output(); err == nil {
+			if plan, err := bootstrap.PlanRepo(ctx, st, strings.TrimSpace(string(out)), "", o.absorb); err == nil {
+				plans = append(plans, plan)
+			}
 		}
-	}
-	if cwd, err := os.Getwd(); err == nil && !*noImport {
-		if _, err := os.Stat(filepath.Join(cwd, ".git")); err == nil &&
-			p.ask(fmt.Sprintf("    Import the git history of %s into your memory?", filepath.Base(cwd)), true) {
-			res, err := bootstrap.ImportGit(context.Background(), st, bootstrap.GitOptions{Repo: cwd, Namespace: "me", MaxCommits: 2000})
-			if err != nil {
-				fmt.Println("    import failed:", err)
-			} else {
-				fmt.Printf("    imported %d commits, %d files and %d conventions\n", res.Commits, res.Files, len(res.Conventions))
+		for _, plan := range plans {
+			q := fmt.Sprintf("    Absorb %s (%d commits, %d docs) into namespace %s?", plan.Name, plan.Commits, len(plan.Rules)+len(plan.Docs), plan.Namespace)
+			if p.ask(q, o.scan == "" || recentlyActive(plan)) {
+				ch.Repos = append(ch.Repos, plan)
 			}
 		}
 	}
-
-	// 6. Permission assist (opt-in).
-	step(6, "Permission assist (shadow mode)")
-	if slicesContains(connected, "claude-code") && (*hooks || p.ask("    Let Engram watch Claude Code permission prompts and predict your answers? It never answers them.", false)) {
-		changed, err := hosts.AddClaudeHooks(filepath.Join(home, ".claude", "settings.json"), exe)
-		switch {
-		case err != nil:
-			fmt.Println("    could not add the hooks:", err)
-		case changed:
-			fmt.Println("    hooks added to ~/.claude/settings.json; see engram permit report in a few weeks")
-		default:
-			fmt.Println("    the hooks were already installed")
-		}
-	} else {
-		fmt.Println("    off (turn on later with engram init --permission-hooks)")
+	claude := false
+	for _, h := range ch.Hosts {
+		claude = claude || h.Name == "claude-code"
 	}
+	ch.Hooks = claude && (o.hooks || p.ask("    Let Engram watch Claude Code permission prompts and predict your answers? It never answers them.", false))
 
-	fmt.Println("\nDone. Next:")
-	if len(connected) > 0 {
-		fmt.Println("  - Restart your agents, then tell one something durable, such as \"remember that branches start with the ticket number\".")
+	progressShown := false
+	tty := isTerminal(os.Stdout)
+	sum, err := applySetup(ctx, st, exe, home, ch, func(e setupEvent) {
+		if e.Kind == "progress" {
+			if tty {
+				fmt.Printf("\r\033[K    %s: %s %d/%d", e.Item, e.Msg, e.Done, e.Total)
+				progressShown = true
+			}
+			return
+		}
+		if progressShown {
+			fmt.Print("\r\033[K")
+			progressShown = false
+		}
+		switch e.Kind {
+		case "step":
+			fmt.Printf("\n%s\n", e.Step)
+		case "warn", "fail":
+			fmt.Printf("    ! %s %s\n", e.Item, e.Msg)
+		default:
+			if e.Item != "" {
+				fmt.Printf("    %s: %s\n", e.Item, e.Msg)
+			} else {
+				fmt.Printf("    %s\n", e.Msg)
+			}
+		}
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\nDone: %d memories and %d pathways added in %.1fs. Next:\n", sum.Memories, sum.Pathways, sum.Elapsed.Seconds())
+	if len(sum.Connected) > 0 {
+		fmt.Println("  - Restart your agents, then ask one \"what do you know about this project?\"")
 	}
 	fmt.Println("  - engram dashboard        see your memory, the inbox and health")
-	fmt.Println("  - engram serve --http …   share it with tools over HTTP (engram token create NAME)")
+	fmt.Println("  - engram absorb DIR       absorb more projects (only changes are added on later runs)")
 	return nil
 }
 

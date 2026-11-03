@@ -2,6 +2,26 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.12.0] - 2026-11-03
+
+Setup that absorbs what you already have.
+
+### Added
+
+- **`engram absorb [DIR|REPO ...]`**: absorb projects. For each git repository: its history (as `import git`), the instructions you already give agents (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.cursor/rules/*`, `.windsurfrules`, `.github/copilot-instructions.md`), its READMEs and docs (`docs/`, `adr/`, `decisions/`, `design/`, `rfcs/`, top-level `ARCHITECTURE.md` and similar; not changelogs or licenses), split at headings into sections, and its stack (languages by file share, frameworks from `package.json`, `go.mod`, `pyproject.toml` and `requirements.txt`, plus Terraform, Docker, Prisma and GitHub Actions). A folder is searched up to four levels deep, skipping hidden, dependency and media folders.
+- Absorbed sections link to a concept per document, documents link to a concept per repository, and a section that mentions a tracked file (for example `api/payouts.go`) links to that file's concept from history.
+- Only files git tracks are read, so `.gitignore` is respected and untracked secrets are never opened; sections that look like secrets are skipped and counted.
+- Re-absorbing adds new commits, updates edited sections in place, retires (archives) sections and documents that are gone, and never resets learned weights (`AddEdgeIfAbsent`).
+- `--dry-run [--json]` describes what would be stored; `--ns` names a single project's namespace; new namespaces are granted to the clients that can write your personal memory (`--grant`, `--no-grant`).
+- **Interactive `engram init`** in a terminal: a full-screen setup (Bubble Tea) with model checks, an agent checklist, a project picker (scan any folder, toggle projects, rename namespaces, see what each one contributes), extras (sleep hours, scheduler, Developer pack, permission assist), a review screen, and live progress with memory and pathway counters. Its header is a small network that fires and spreads like recall does.
+- `engram init --scan DIR`, `--plain` (yes/no prompts), `--dry-run [--json]` (the plan, including models, agents and projects, without changing anything), `--since`, `--max-commits`.
+
+### Changed
+
+- `engram init` absorbs projects into their own namespaces (`ink`, `easyscript`) instead of importing the current repository into `me`, and grants connected agents read and write on them.
+- The plain prompts and the interactive setup share one implementation (`setupChoices` and `applySetup`), so they can't drift apart.
+- New dependency: `github.com/charmbracelet/bubbletea`, `bubbles` and `lipgloss` (MIT), for the terminal UI only.
+
 ## [0.11.0] - 2026-11-03
 
 Engine milestone M11: packaging and protocol. Not included: freezing ECP v1 (open issues remain) and the Postgres backend (its own milestone).

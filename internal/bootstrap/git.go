@@ -31,6 +31,8 @@ type GitOptions struct {
 	Since      string // passed to git log --since, e.g. "6 months ago"; empty = all
 	MaxCommits int    // newest first; default 2000
 	MinCoFiles int    // a file pair must change together this many times to be linked; default 3
+	// Progress, when set, is called as commits are stored (done of total).
+	Progress func(done, total int)
 }
 
 // GitResult reports what a git import created.
@@ -167,7 +169,10 @@ func ImportGit(ctx context.Context, st *store.Store, o GitOptions) (GitResult, e
 
 	// One episode per commit, linked to the files it touched.
 	pairs := map[[2]string]int{}
-	for _, c := range commits {
+	for i, c := range commits {
+		if o.Progress != nil && (i%10 == 0 || i == len(commits)-1) {
+			o.Progress(i+1, len(commits))
+		}
 		short := c.hash[:min(8, len(c.hash))]
 		files := c.files
 		listed := files

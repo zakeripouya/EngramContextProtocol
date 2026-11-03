@@ -456,6 +456,7 @@ A new install imports existing history so Engram starts with knowledge instead o
 - **Importers:** git history (co-changed files, commit messages), Jira tickets, PRs and review comments, and assistant chat exports.
 - **Low priors:** imported memories start at low weight and low confidence, marked with provenance `import`, and earn strength through use.
 - **Dedupe on import:** the same near-duplicate and entity-resolution steps as live writes.
+- **Absorbing projects** *(✅ 0.12.0)*: `engram init` scans for repositories and absorbs each one's history, the rules files users already write for agents (`CLAUDE.md`, `AGENTS.md`, Cursor rules), its docs split at headings, and its stack, into a namespace per project. A concept per repository and per document gives the absorbed sections structure from the first minute. Re-absorbing is incremental. PRs, review comments and assistant chat exports are not absorbed yet (see the backlog).
 - Brain parallel: prior knowledge and schemas speed later learning; the importers themselves are plain software.
 
 ## Pathway packs

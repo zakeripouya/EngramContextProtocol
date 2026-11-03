@@ -1,6 +1,6 @@
 # Backlog
 
-Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) and the [README](../README.md) that is **not built yet**, plus known rough edges in what is built. Milestones M1–M10 are done; this file tracks what's left.
+Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) and the [README](../README.md) that is **not built yet**, plus known rough edges in what is built. Milestones M1–M11 are done; this file tracks what's left.
 
 **How to use it.** Tick an item when it ships, add a line to the [CHANGELOG](../CHANGELOG.md), and change the matching *design* label in the README or design doc. New gaps found while building go here, not in TODO comments.
 
@@ -168,6 +168,13 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 ## 15. Packaging (M11)
 
 - [x] `engram init`: one-command setup (database, embeddings, LLM, sleep hours, pairing, hooks). Install under five minutes. `M11` `M`
+- [x] Project absorption: `engram absorb` and `init --scan` find repositories and absorb history, agent rules files, docs and stack, incrementally (0.12.0). `polish` `M`
+- [x] Interactive full-screen `engram init` with a project picker, review screen and live progress; `--plain`, `--yes` and `--dry-run --json` for scripts and agents (0.12.0). `polish` `M`
+- [ ] Browser setup wizard in the dashboard, for people who don't live in a terminal: the same choices as the terminal setup, with the absorb preview and the map drawing itself. `polish` `M`
+- [ ] Re-absorb known projects in the sleep cycle (new commits, edited docs), so the map stays current without running `absorb`. `polish` `S`
+- [ ] Absorb a claude.ai or ChatGPT data export: a chat model extracts decisions and facts per conversation (one call per chunk, no agent loop), routed to project namespaces, with a keep/discard preview before anything is stored. `v2` `M`
+- [ ] Absorb issues and pull requests (GitHub, Jira) during the scan, linked to the commits and files they touched. `v2` `M`
+- [ ] A short agent skill for driving setup: read `init --dry-run --json`, ask the user, then run `absorb` per project. `polish` `S`
 - [x] Release builds and install paths (GitHub releases, Homebrew), with cgo SQLite cross-compiles. `M11` `M`
 - [x] Docker Compose for self-hosting: engine, trigger listener, dashboard, sleep loop and optional Ollama, on SQLite (0.11.0); Postgres, Redis and ML workers join when they exist. `M11` `M`
 - [ ] Engram Cloud: hosted sync, team memory, backups. `research` `L`
@@ -204,4 +211,6 @@ Small things to revisit during refinement; none block use.
 - Multiple processes share one SQLite file with a 5 s busy timeout; heavy concurrent writers may still see lock waits.
 - Packs installed before 0.11.0 have no recorded priors, so their reweighting stats stay at zero until reinstalled.
 - `engram/consolidate` cannot target one namespace yet, and needs a write grant on `*`.
+- Absorbing a long `CLAUDE.md` or a docs-heavy repo produces many sections (EasyScript's 600-line `CLAUDE.md` became about 150), and kNN wiring adds up to several `similar` edges each; watch hub degree on large imports.
+- The terminal setup asks the terminal for its background color; terminals that never answer delay start-up by a few seconds (a Bubble Tea/termenv behavior).
 - The release workflow, Homebrew formula, Docker image and `install.sh` are written and statically checked, but have not run yet: their first real run is the first `v*` tag and CI build after `go.sum` is fixed.
