@@ -2,58 +2,25 @@ package store
 
 import (
 	"math"
-	"strings"
-	"unicode"
+
+	"github.com/zakeripouya/EngramContextProtocol/internal/text"
 )
 
-// M1 ranks recall candidates with BM25 over words, computed in Go so the build
-// needs no SQLite extensions. Milestone M2 replaces this with embeddings and
-// kNN wiring, and M4 adds spreading activation (docs/design.md, "Retrieval").
+// Keyword relevance (BM25), computed in Go so the build needs no SQLite
+// extensions. Since M2 it is one signal among several in recall, alongside
+// vector similarity, strength and pathways.
 
-var stopwords = map[string]bool{
-	"a": true, "an": true, "and": true, "are": true, "as": true, "at": true, "be": true, "by": true,
-	"do": true, "does": true, "for": true, "from": true, "how": true, "i": true, "in": true, "is": true,
-	"it": true, "me": true, "my": true, "of": true, "on": true, "or": true, "should": true, "so": true,
-	"that": true, "the": true, "this": true, "to": true, "was": true, "we": true, "what": true,
-	"when": true, "where": true, "which": true, "who": true, "why": true, "with": true, "you": true,
-}
-
-// Tokenize lowercases text and returns content words with simple plural folding.
-func Tokenize(text string) []string {
-	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
-	out := make([]string, 0, len(fields))
-	for _, w := range fields {
-		if len(w) < 2 || stopwords[w] {
-			continue
-		}
-		out = append(out, stem(w))
-	}
-	return out
-}
-
-func stem(w string) string {
-	switch {
-	case len(w) > 4 && strings.HasSuffix(w, "ies"):
-		return w[:len(w)-3] + "y"
-	case len(w) > 4 && (strings.HasSuffix(w, "ches") || strings.HasSuffix(w, "shes") ||
-		strings.HasSuffix(w, "sses") || strings.HasSuffix(w, "xes") || strings.HasSuffix(w, "zes")):
-		return w[:len(w)-2]
-	case len(w) > 3 && strings.HasSuffix(w, "s") && !strings.HasSuffix(w, "ss"):
-		return w[:len(w)-1]
-	}
-	return w
-}
+// Tokenize returns normalized content words. Kept for callers of the M1 API.
+func Tokenize(s string) []string { return text.Tokenize(s) }
 
 type doc struct {
 	terms map[string]int
 	n     int
 }
 
-func newDoc(text string) doc {
+func newDoc(s string) doc {
 	d := doc{terms: map[string]int{}}
-	for _, t := range Tokenize(text) {
+	for _, t := range text.Tokenize(s) {
 		d.terms[t]++
 		d.n++
 	}

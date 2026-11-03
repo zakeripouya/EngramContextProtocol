@@ -177,7 +177,8 @@ export interface ObserveParams {
 }
 export interface ObserveResult {
   id: string;
-  linked: number; // edges created
+  linked: number; // edges created (supersedes and kNN similar edges)
+  embedded?: boolean; // false when no embedding was available; the memory is still stored
 }
 
 export interface RecallParams {

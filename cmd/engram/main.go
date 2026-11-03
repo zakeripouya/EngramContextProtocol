@@ -25,6 +25,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/zakeripouya/EngramContextProtocol/internal/ecp"
+	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
 	"github.com/zakeripouya/EngramContextProtocol/internal/server"
 	"github.com/zakeripouya/EngramContextProtocol/internal/store"
 )
@@ -37,10 +38,15 @@ Usage:
   engram clients                          list paired clients and their grants
   engram revoke NAME                      remove all of a client's grants
   engram stats                            show memory counts
+  engram reembed                          embed memories that have no vector yet and wire their neighbors
+  engram decay                            weaken learned pathways and prune the weakest
   engram setup claude-code|claude-desktop print connection instructions
   engram version                          print the version
 
 Database: $ENGRAM_DB, or ~/.engram/engram.db
+Embeddings: $ENGRAM_EMBED = auto (default) | openai | hash | off
+            $ENGRAM_EMBED_URL (default http://localhost:11434, Ollama), $ENGRAM_EMBED_MODEL
+            (default nomic-embed-text), $ENGRAM_EMBED_KEY for hosted providers
 `
 
 func main() {
@@ -110,6 +116,11 @@ func run(args []string) error {
 		return err
 	}
 	defer st.Close()
+	if cmd == "serve" || cmd == "reembed" {
+		e, note := embed.New(context.Background(), embed.FromEnv())
+		st.SetEmbedder(e)
+		fmt.Fprintln(os.Stderr, "engram:", note) // stderr: stdout carries the MCP protocol
+	}
 
 	switch cmd {
 	case "serve":
@@ -192,8 +203,29 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("memories    %d\ncurrent     %d\nedges       %d\nclients     %d\nnamespaces  %s\n",
-			s.Memories, s.Current, s.Edges, s.Clients, strings.Join(s.Namespaces, ", "))
+		kinds, err := st.EdgeCounts()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("memories    %d\ncurrent     %d\nedges       %d (similar %d, coactive %d, supersedes %d)\nclients     %d\nnamespaces  %s\n",
+			s.Memories, s.Current, s.Edges, kinds["similar"], kinds["coactive"], kinds["supersedes"],
+			s.Clients, strings.Join(s.Namespaces, ", "))
+		return nil
+
+	case "reembed":
+		r, err := st.Reembed(context.Background())
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Embedded %d memories with %s and linked %d neighbors\n", r.Embedded, r.Model, r.Linked)
+		return nil
+
+	case "decay":
+		r, err := st.Decay()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Weakened %d learned pathways, pruned %d\n", r.Decayed, r.Pruned)
 		return nil
 	}
 	return fmt.Errorf("unknown command %q; run engram help", cmd)

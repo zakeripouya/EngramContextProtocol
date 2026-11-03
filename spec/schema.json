@@ -1131,6 +1131,9 @@
     "ObserveResult": {
       "additionalProperties": false,
       "properties": {
+        "embedded": {
+          "type": "boolean"
+        },
         "id": {
           "type": "string"
         },

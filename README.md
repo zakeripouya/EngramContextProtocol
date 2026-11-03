@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestone M1 (a working memory server) is implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server) and M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
 
 ---
 
@@ -70,6 +70,24 @@ In Claude Code, say something durable: *"Remember that branches always start wit
 
 For Claude Desktop, run `engram setup claude-desktop` and paste the printed snippet into `claude_desktop_config.json`.
 
+### Embeddings (optional but recommended)
+
+Engram finds memories by meaning when an embedding server is running, and by shared words when not. Any server with an OpenAI-compatible `/v1/embeddings` API works; [Ollama](https://ollama.com) is the default:
+
+```bash
+ollama pull nomic-embed-text   # then keep Ollama running
+engram reembed                 # embed anything stored before the server was up
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ENGRAM_EMBED` | `auto` | `auto` (use the server if it answers, else the offline hashing embedder), `openai`, `hash` or `off` |
+| `ENGRAM_EMBED_URL` | `http://localhost:11434` | Base URL of the embedding server (llama.cpp, LM Studio and hosted providers work too) |
+| `ENGRAM_EMBED_MODEL` | `nomic-embed-text` | Model name |
+| `ENGRAM_EMBED_KEY` | | Bearer token for hosted providers |
+
+Vectors from different models are never compared; run `engram reembed` after switching models.
+
 ### CLI
 
 | Command | What it does |
@@ -78,7 +96,9 @@ For Claude Desktop, run `engram setup claude-desktop` and paste the printed snip
 | `engram pair NAME --read NS --write NS [--expires 30d]` | Approve a client for namespaces (comma-separated) |
 | `engram clients` | List paired clients and their grants |
 | `engram revoke NAME` | Remove all of a client's grants |
-| `engram stats` | Show memory counts |
+| `engram stats` | Show memory and pathway counts |
+| `engram reembed` | Embed memories that have no vector yet and wire their neighbors |
+| `engram decay` | Weaken learned pathways and prune the weakest (nightly in M5) |
 | `engram setup claude-code` / `claude-desktop` | Print connection instructions |
 | `engram version` | Print the engine and protocol versions |
 
@@ -99,9 +119,13 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | Decisions require `author: "user"`; agent ideas are `suggestion` | ✅ M1 |
 | Secret, token and card-number filter | ✅ M1 |
 | Forget with cascade to derived memories | ✅ M1 |
-| BM25 text ranking for recall | ✅ M1 (replaced in M2) |
-| Embeddings, kNN wiring, Hebbian learning | design (M2) |
-| Spreading activation, feedback, confidence | design (M4) |
+| Keyword ranking (BM25) | ✅ M1 |
+| Embeddings through any OpenAI-compatible server, offline fallback | ✅ M2 |
+| kNN wiring: new memories link to similar ones in their namespace | ✅ M2 |
+| Hebbian learning: memories recalled together build pathways, with anti-echo | ✅ M2 |
+| Decay and pruning of learned pathways | ✅ M2 |
+| Pathway recall: one hop of spreading activation, with paths and reasons | ✅ M2 |
+| Multi-hop spreading, feedback, confidence | design (M4) |
 | Sleep cycle, verifier, morning report | design (M5) |
 | Session handoff, second agent | design (M7) |
 | Triggers, push notifications, `attend` | design (M8) |
@@ -181,7 +205,7 @@ Learning in one namespace never changes another's weights. Links between namespa
 
 ## How Engram learns
 
-*Design (M2 to M4).*
+*kNN wiring, Hebbian learning with anti-echo, and decay are implemented (M2); sparse codes, three-factor learning and feedback are design (M4 and later).*
 
 **Encoding.** Each memory gets a dense embedding (a small local model such as `all-MiniLM-L6-v2`, 384 dimensions) for similarity, and a **sparse block code** (initially 64 blocks of 128 positions, one active per block, about 0.8% density) for brain-like operations: overlap = similarity, per-block shifts bind two concepts reversibly, per-block voting bundles several into a composite thought. A train of thought is the sequence of codes that spreading activation visits, which can be stored and replayed.
 
@@ -201,7 +225,7 @@ w_ij ← (1 − λ) · w_ij + η · a_i · a_j
 
 ## Retrieval
 
-*Design (M4); M1 uses BM25 text ranking.*
+*Implemented in M2: keyword and vector seeding, one hop of spreading activation, ranking and paths. Multi-hop beam search, confidence and `attend` are design (M4, M8).*
 
 1. **Seed** by dense similarity and sparse-code overlap within the caller's namespaces.
 2. **Spread** activation over `similar` and `coactive` edges for up to two hops, fan-out capped, with a 1/√degree penalty.
@@ -579,7 +603,7 @@ A feature may be used only if the relevant side declared it. Servers MUST suppor
   "validFrom": "2026-09-15",
   "supersedes": "mem_0aa1b2c3d4e5f607"}}
 
-{"jsonrpc": "2.0", "id": 2, "result": {"id": "mem_9c8b7a6f5e4d3c2b", "linked": 1}}
+{"jsonrpc": "2.0", "id": 2, "result": {"id": "mem_9c8b7a6f5e4d3c2b", "linked": 3, "embedded": true}}
 ```
 
 | Param | Required | Notes |
@@ -592,7 +616,9 @@ A feature may be used only if the relevant side declared it. Servers MUST suppor
 | `scope` | no | Default `private` |
 | `tags`, `service`, `sessionId` | no | |
 | `validFrom` | no | When it became true; default now |
-| `supersedes` | no | The older memory stops being current; `linked` counts the new edge |
+| `supersedes` | no | The older memory stops being current |
+
+`linked` counts edges created (the `supersedes` edge plus kNN `similar` edges); `embedded` is false when no embedding server answered, and `engram reembed` fixes it later.
 
 #### `engram/recall`
 
@@ -612,7 +638,7 @@ A feature may be used only if the relevant side declared it. Servers MUST suppor
    "score": 0.71, "reason": "text match"}]}}
 ```
 
-Without `asOf`, memories whose `validTo` has passed are excluded. `namespaces` defaults to everything the client may read; asking for one it can't read returns `-32004`.
+Results reached through a pathway carry `"path": [seed, memory]` and a reason such as `"via coactive pathway from mem_…"`. `spread` is 0 or 1 hops in M2 (default 1). Without `asOf`, memories whose `validTo` has passed are excluded. `namespaces` defaults to everything the client may read; asking for one it can't read returns `-32004`.
 
 #### `engram/get` and `engram/forget`
 
@@ -765,7 +791,7 @@ Each milestone is roughly one to two weekends and has a done-check.
 
 **Phase 1 · Core memory**
 1. **M1 · Working server** ✅ Go MCP server, SQLite, pairing. *Done when* a fact told in one session is recalled in a fresh one.
-2. **M2 · Engram core:** embeddings, kNN and Hebbian edges. *Done when* recall surfaces a memory reachable only through a pathway.
+2. **M2 · Engram core** ✅ Embeddings, kNN and Hebbian edges, decay, pathway recall. *Done when* recall surfaces a memory reachable only through a pathway.
 3. **M3 · Bootstrapping:** import git and Jira history and a first Developer pack. *Done when* an agent applies a repo convention unprompted.
 4. **M4 · Learning and retrieval:** spreading activation, feedback, three-factor learning, ACT-R decay, lateral inhibition, confidence. *Done when* an override changes the next recall.
 
@@ -792,7 +818,9 @@ Each milestone is roughly one to two weekends and has a done-check.
 ```
 cmd/engram/          CLI and server entry point
 internal/ecp/        protocol version and error codes
-internal/store/      SQLite store, grants, time validity, ranking, secret filter
+internal/store/      SQLite store, grants, time validity, ranking, graph learning, secret filter
+internal/embed/      embedding providers (OpenAI-compatible, offline hashing)
+internal/text/       tokenizer shared by ranking and hashing
 internal/server/     MCP tools (the ECP compatibility profile)
 spec/schema.ts       normative ECP schema
 spec/schema.json     generated JSON Schema

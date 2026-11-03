@@ -7,6 +7,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -22,6 +23,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/zakeripouya/EngramContextProtocol/internal/ecp"
+	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
+	"github.com/zakeripouya/EngramContextProtocol/internal/text"
 )
 
 const schema = `
@@ -77,6 +80,26 @@ CREATE TABLE IF NOT EXISTS audit (
   detail    TEXT
 );
 `
+
+// migrations upgrade a database step by step; PRAGMA user_version records the last one applied.
+var migrations = []string{
+	// 1 (M2): vectors, Hebbian bookkeeping and edge timestamps.
+	`ALTER TABLE edges ADD COLUMN updated_at TEXT;
+	CREATE INDEX IF NOT EXISTS edges_dst ON edges(dst, kind);
+	CREATE TABLE IF NOT EXISTS vectors (
+	  memory_id TEXT PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
+	  model     TEXT NOT NULL,
+	  dims      INTEGER NOT NULL,
+	  vec       BLOB NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS coactivations (
+	  a      TEXT NOT NULL,
+	  b      TEXT NOT NULL,
+	  client TEXT NOT NULL,
+	  at     TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS coactivations_pair ON coactivations(a, b, client, at);`,
+}
 
 // Accepted values (spec, "Data types").
 var (
@@ -141,11 +164,12 @@ type Memory struct {
 	LastActivatedAt string     `json:"lastActivatedAt,omitempty"`
 }
 
-// Scored is a recall result.
+// Scored is a recall result. Path is set when the memory was reached through a pathway.
 type Scored struct {
-	Memory Memory  `json:"memory"`
-	Score  float64 `json:"score"`
-	Reason string  `json:"reason"`
+	Memory Memory   `json:"memory"`
+	Score  float64  `json:"score"`
+	Reason string   `json:"reason"`
+	Path   []string `json:"path,omitempty"`
 }
 
 // Grant is one client's access to one namespace.
@@ -181,10 +205,15 @@ type RecallInput struct {
 	Tags       []string
 	Namespaces []string
 	AsOf       string
+	Hops       int // spreading-activation hops: 0 = direct matches only, 1 (default from the server) = one hop
 }
 
 // Store is one Engram instance.
-type Store struct{ db *sql.DB }
+type Store struct {
+	db    *sql.DB
+	emb   embed.Embedder
+	learn Learning
+}
 
 // Open opens (creating if needed) the database at path. Use ":memory:" for tests.
 func Open(path string) (*Store, error) {
@@ -207,8 +236,31 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("initialize schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: db, learn: DefaultLearning}, nil
 }
+
+func migrate(db *sql.DB) error {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	for i := version; i < len(migrations); i++ {
+		if _, err := db.Exec(migrations[i]); err != nil {
+			return fmt.Errorf("migration %d: %w", i+1, err)
+		}
+		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, i+1)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetLearning replaces the learning parameters (for tuning and tests).
+func (s *Store) SetLearning(l Learning) { s.learn = l }
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
@@ -360,8 +412,9 @@ func (s *Store) readable(client string) (nss []string, all bool, err error) {
 
 // ObserveResult is returned by Observe.
 type ObserveResult struct {
-	ID     string `json:"id"`
-	Linked int    `json:"linked"`
+	ID       string `json:"id"`
+	Linked   int    `json:"linked"`
+	Embedded bool   `json:"embedded"`
 }
 
 // Observe stores a memory after validating it, checking grants and filtering secrets.
@@ -433,14 +486,12 @@ func (s *Store) Observe(client string, in ObserveInput) (ObserveResult, error) {
 	}
 	id := "mem_" + newID()
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return ObserveResult{}, err
-	}
-	defer tx.Rollback()
+	// Checks that read the database happen before the write transaction starts:
+	// an in-memory store has a single connection, so reading inside the
+	// transaction would wait on itself.
 	if in.Supersedes != "" {
 		var ns string
-		err := tx.QueryRow(`SELECT namespace FROM memories WHERE id = ?`, in.Supersedes).Scan(&ns)
+		err := s.db.QueryRow(`SELECT namespace FROM memories WHERE id = ?`, in.Supersedes).Scan(&ns)
 		if err == sql.ErrNoRows {
 			return ObserveResult{}, ecp.Errorf(ecp.MemoryNotFound, "no memory %q", in.Supersedes)
 		} else if err != nil {
@@ -450,6 +501,12 @@ func (s *Store) Observe(client string, in ObserveInput) (ObserveResult, error) {
 			return ObserveResult{}, ecp.Errorf(ecp.ScopeDenied, "cannot supersede a memory in namespace %q", ns)
 		}
 	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return ObserveResult{}, err
+	}
+	defer tx.Rollback()
 	_, err = tx.Exec(`INSERT INTO memories(id, kind, content, tags, scope, namespace, strength, decision,
 		agent, client, service, session_id, author, created_at, valid_from) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, in.Kind, in.Content, string(tagsJSON), in.Scope, in.Namespace, strength, nullable(decisionJSON),
@@ -470,7 +527,14 @@ func (s *Store) Observe(client string, in ObserveInput) (ObserveResult, error) {
 	if err := audit(tx, client, "observe", in.Namespace, id); err != nil {
 		return ObserveResult{}, err
 	}
-	return ObserveResult{ID: id, Linked: linked}, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return ObserveResult{}, err
+	}
+	n, embedded, err := s.embedAndLink(context.Background(), id, in.Namespace, in.Content)
+	if err != nil {
+		return ObserveResult{}, err
+	}
+	return ObserveResult{ID: id, Linked: linked + n, Embedded: embedded}, nil
 }
 
 // AddEdge inserts or updates an edge. Used by later milestones and tests.
@@ -566,15 +630,24 @@ const memoryColumns = `id, kind, content, tags, scope, namespace, strength, conf
 	agent, client, COALESCE(service,''), COALESCE(session_id,''), author, created_at, valid_from,
 	COALESCE(valid_to,''), COALESCE(last_activated_at,'')`
 
+// memoryColumnsM is memoryColumns qualified with the alias m, for joins.
+const memoryColumnsM = `m.id, m.kind, m.content, m.tags, m.scope, m.namespace, m.strength, m.confidence,
+	COALESCE(m.decision,''), m.agent, m.client, COALESCE(m.service,''), COALESCE(m.session_id,''), m.author,
+	m.created_at, m.valid_from, COALESCE(m.valid_to,''), COALESCE(m.last_activated_at,'')`
+
 type scanner interface{ Scan(dest ...any) error }
 
-func scanMemory(r scanner) (Memory, error) {
+func scanMemory(r scanner) (Memory, error) { return scanMemoryWith(r) }
+
+// scanMemoryWith scans the memory columns followed by any extra destinations.
+func scanMemoryWith(r scanner, extra ...any) (Memory, error) {
 	var m Memory
 	var tags, decision string
 	var conf sql.NullFloat64
-	err := r.Scan(&m.ID, &m.Kind, &m.Content, &tags, &m.Scope, &m.Namespace, &m.Strength, &conf, &decision,
+	dest := []any{&m.ID, &m.Kind, &m.Content, &tags, &m.Scope, &m.Namespace, &m.Strength, &conf, &decision,
 		&m.Provenance.Agent, &m.Provenance.Client, &m.Provenance.Service, &m.Provenance.SessionID,
-		&m.Provenance.Author, &m.CreatedAt, &m.ValidFrom, &m.ValidTo, &m.LastActivatedAt)
+		&m.Provenance.Author, &m.CreatedAt, &m.ValidFrom, &m.ValidTo, &m.LastActivatedAt}
+	err := r.Scan(append(dest, extra...)...)
 	if err != nil {
 		return m, err
 	}
@@ -634,8 +707,14 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 		}
 		allowed, all = in.Namespaces, false
 	}
-	query := Tokenize(in.Query)
-	if len(query) == 0 {
+	query := text.Tokenize(in.Query)
+	var qvec []float32
+	if s.emb != nil {
+		if v, err := s.emb.Embed(context.Background(), []string{in.Query}, embed.Query); err == nil && len(v) == 1 {
+			qvec = v[0]
+		}
+	}
+	if len(query) == 0 && qvec == nil {
 		return nil, ecp.Errorf(ecp.InvalidParams, "query has no searchable words")
 	}
 	if !all && len(allowed) == 0 {
@@ -644,12 +723,16 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 
 	where := []string{"1=1"}
 	args := []any{}
+	model := ""
+	if s.emb != nil {
+		model = s.emb.Model()
+	}
 	if !all {
-		where = append(where, "namespace IN ("+placeholders(len(allowed))+")")
+		where = append(where, "m.namespace IN ("+placeholders(len(allowed))+")")
 		args = append(args, toAny(allowed)...)
 	}
 	if len(in.Kinds) > 0 {
-		where = append(where, "kind IN ("+placeholders(len(in.Kinds))+")")
+		where = append(where, "m.kind IN ("+placeholders(len(in.Kinds))+")")
 		args = append(args, toAny(in.Kinds)...)
 	}
 	historical := in.AsOf != ""
@@ -663,22 +746,28 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 			at = at.Add(24*time.Hour - time.Second)
 		}
 		a := ts(at)
-		where = append(where, "created_at <= ? AND valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)")
-		args = append(args, a, a, a)
+		// "As of" asks what was true in the world then (valid time), using everything known now,
+		// including facts recorded later about that period.
+		where = append(where, "m.valid_from <= ? AND (m.valid_to IS NULL OR m.valid_to > ?)")
+		args = append(args, a, a)
 	} else {
-		where = append(where, "(valid_to IS NULL OR valid_to > ?)")
+		where = append(where, "(m.valid_to IS NULL OR m.valid_to > ?)")
 		args = append(args, ts(Now()))
 	}
+	args = append([]any{model}, args...)
 	args = append(args, maxCandidates)
-	rows, err := s.db.Query(`SELECT `+memoryColumns+` FROM memories WHERE `+strings.Join(where, " AND ")+
-		` ORDER BY created_at DESC LIMIT ?`, args...)
+	rows, err := s.db.Query(`SELECT `+memoryColumnsM+`, v.vec FROM memories m
+		LEFT JOIN vectors v ON v.memory_id = m.id AND v.model = ?
+		WHERE `+strings.Join(where, " AND ")+` ORDER BY m.created_at DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
 	var mems []Memory
+	var vecs [][]float32
 	var docs []doc
 	for rows.Next() {
-		m, err := scanMemory(rows)
+		var vb []byte
+		m, err := scanMemoryWith(rows, &vb)
 		if err != nil {
 			rows.Close()
 			return nil, err
@@ -687,40 +776,116 @@ func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
 			continue
 		}
 		mems = append(mems, m)
+		if len(vb) > 0 {
+			vecs = append(vecs, decodeVec(vb))
+		} else {
+			vecs = append(vecs, nil)
+		}
 		docs = append(docs, newDoc(m.Content+" "+strings.Join(m.Tags, " ")))
 	}
 	rows.Close()
 
-	scores := bm25(query, docs)
-	var results []Scored
-	for i, sc := range scores {
-		if sc <= 0 {
+	// Direct relevance: keywords and, when available, vector similarity.
+	kw := bm25(query, docs)
+	minSim := s.learn.MinSimilarity
+	type cand struct {
+		score  float64
+		reason string
+		path   []string
+	}
+	scored := map[int]cand{}
+	index := map[string]int{}
+	for i, m := range mems {
+		index[m.ID] = i
+		kwScore := 0.0
+		if kw[i] > 0 {
+			kwScore = kw[i] / (kw[i] + 1)
+		}
+		sem, hasSem := 0.0, false
+		if qvec != nil && vecs[i] != nil {
+			if c := embed.Cosine(qvec, vecs[i]); c >= minSim {
+				sem, hasSem = (c-minSim)/(1-minSim), true
+			}
+		}
+		if kwScore == 0 && !hasSem {
 			continue
 		}
-		relevance := sc / (sc + 1) // squash to 0..1
-		reason := "text match"
-		if mems[i].Kind == "decision" {
-			reason = "text match, user decision"
+		rel := kwScore
+		reason := "keyword match"
+		if qvec != nil {
+			rel = 0.5*kwScore + 0.5*sem
+			switch {
+			case hasSem && kwScore > 0:
+				reason = "meaning and keyword match"
+			case hasSem:
+				reason = "meaning match"
+			}
 		}
-		results = append(results, Scored{Memory: mems[i], Score: round4(0.75*relevance + 0.25*mems[i].Strength), Reason: reason})
+		scored[i] = cand{score: 0.75*rel + 0.25*m.Strength, reason: reason}
 	}
-	sort.SliceStable(results, func(i, j int) bool { return results[i].Score > results[j].Score })
+
+	// One hop of spreading activation through learned and similarity edges.
+	if in.Hops > 0 && len(scored) > 0 {
+		seeds := make([]int, 0, len(scored))
+		for i := range scored {
+			seeds = append(seeds, i)
+		}
+		sort.Slice(seeds, func(a, b int) bool { return scored[seeds[a]].score > scored[seeds[b]].score })
+		if len(seeds) > 10 {
+			seeds = seeds[:10]
+		}
+		seedIDs := make([]string, len(seeds))
+		for k, i := range seeds {
+			seedIDs[k] = mems[i].ID
+		}
+		nbs, err := s.neighbors(seedIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, si := range seeds {
+			seed := mems[si]
+			for _, n := range nbs[seed.ID] {
+				j, ok := index[n.id] // only memories that pass this query's filters
+				if !ok {
+					continue
+				}
+				act := scored[si].score * n.weight * 0.6
+				if cur, ok := scored[j]; ok && cur.score >= act {
+					continue
+				}
+				scored[j] = cand{score: act, reason: "via " + n.kind + " pathway from " + seed.ID, path: []string{seed.ID, n.id}}
+			}
+		}
+	}
+
+	results := make([]Scored, 0, len(scored))
+	for i, c := range scored {
+		results = append(results, Scored{Memory: mems[i], Score: round4(c.score), Reason: c.reason, Path: c.path})
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Score != results[j].Score {
+			return results[i].Score > results[j].Score
+		}
+		return results[i].Memory.ID < results[j].Memory.ID
+	})
 	if len(results) > in.K {
 		results = results[:in.K]
 	}
 	if !historical && len(results) > 0 {
 		now := ts(Now())
-		for _, r := range results {
+		ids := make([]string, len(results))
+		for i, r := range results {
+			ids[i] = r.Memory.ID
 			if _, err := s.db.Exec(`UPDATE memories SET last_activated_at = ?, activations = activations + 1 WHERE id = ?`, now, r.Memory.ID); err != nil {
 				return nil, err
 			}
 		}
+		if err := s.coactivate(client, ids); err != nil {
+			return nil, err
+		}
 	}
 	detail, _ := json.Marshal(map[string]any{"q": in.Query, "n": len(results)})
 	_ = audit(s.db, client, "recall", "", string(detail))
-	if results == nil {
-		results = []Scored{}
-	}
 	return results, nil
 }
 
