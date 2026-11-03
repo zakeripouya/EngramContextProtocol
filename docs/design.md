@@ -710,6 +710,8 @@ The dashboard reads through the same ECP methods as agents (plus an `x-engram/gr
 
 ## Roadmap
 
+Every item not built yet, with its phase and size, is tracked in the [backlog](backlog.md).
+
 The design has grown well past a weekend project, so the work is phased: each phase leaves a usable system, and each milestone has a done-check. Milestones are sized at roughly one to two weekends each, a rough estimate to revise after M2.
 
 **Phase 1 · Core memory**

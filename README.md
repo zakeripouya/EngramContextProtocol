@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`), M9 (permission assist in shadow mode) and M10 (the local dashboard, approvals inbox and static report) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`), M9 (permission assist in shadow mode) and M10 (the local dashboard, approvals inbox and static report) are implemented and tested. Everything marked *design* below is specified but not built yet; the [backlog](docs/backlog.md) tracks every remaining item. See the [roadmap](#roadmap).
 
 ---
 
@@ -287,7 +287,7 @@ w_ij ← (1 − λ) · w_ij + η · a_i · a_j
 *Implemented (M2, M4): keyword and vector seeding, ACT-R priors, multi-hop beam spreading with paths, lateral inhibition and confidence. `attend` is implemented in M8; maximin path queries are design.*
 
 1. **Seed** by dense similarity and sparse-code overlap within the caller's namespaces.
-2. **Spread** activation over `similar` and `coactive` edges for up to two hops, fan-out capped, with a 1/√degree penalty.
+2. **Spread** activation over `similar` and `coactive` edges for two hops by default (up to three), as a beam of 10, fan-out capped, with a 1/√degree penalty.
 3. **Rank** by similarity, spread activation, strength and recency.
 4. **Return** results with provenance, a calibrated confidence, and the path that reached each one.
 
@@ -349,7 +349,7 @@ Until a few hundred feedback events exist, ranking and prediction use hand-set r
 
 ## Decision memory and the personal model
 
-*Design (M4, M9).* Engram's distinguishing goal is to know how you decide.
+*Decisions with situation, choice and rationale, feedback and overrides (M4) and permission predictions in shadow mode (M9) are implemented; predicting a choice for a new situation, traits and the held-out evaluation are design.* Engram's distinguishing goal is to know how you decide.
 
 - **Decision episodes** store situation, options, choice, rationale, tags and later outcome.
 - **Prediction** retrieves the most similar past decisions and the traits they activate, and returns a predicted choice *with the precedents behind it*, so agents can explain and you can catch bad generalizations.
@@ -544,17 +544,7 @@ The dashboard is one Go binary serving an embedded page with no external request
 | Agents | Grants and 30 days of activity per client | Revoke |
 | Permissions | Shadow-mode agreement per tier and the requests it would have wrongly approved | |
 
-Planned beyond M10:
-
-| View | Shows |
-| --- | --- |
-| Overview | Size, health, drift, cost, last sleep cycle |
-| Pathways | A rotatable 3D graph: regions, hubs, edge strength, recent activation |
-| Thought paths | Why something was recalled, with its weakest link |
-| Decisions and traits | What Engram learned, to approve, edit or reject |
-| Sleep report | The cycle timeline, verifier outcomes, per-region changes, undo |
-| Packs, triggers, clients | Installed packs, fired actions, who wrote what, consent |
-| Health | Bounds over time, snapshots and rollback |
+Planned beyond M10 (see the [backlog](docs/backlog.md#10-dashboard)): a thought-path view with the weakest link of each recall, a decisions-and-traits view to approve candidate traits, a packs view, teammate consent, cost metrics, a 3D graph, and a hosted view.
 
 Delivery: a live local dashboard (default), a static HTML report regenerated each night, or a hosted view that exports only aggregates and the morning report.
 
@@ -750,7 +740,7 @@ Results reached through a pathway carry `"path": [seed, memory]` and a reason su
 
 With `cascade`, memories derived only from the forgotten ones are removed too.
 
-#### `engram/attend` *(design)*
+#### `engram/attend`
 
 ```json
 {"jsonrpc": "2.0", "id": 6, "method": "engram/attend", "params": {
@@ -928,6 +918,8 @@ Each milestone is roughly one to two weekends and has a done-check.
 **Phase 4 · Distribution**
 11. **M11 · Packaging and protocol:** `engram init`, ECP v1, conformance suite, SDKs, Docker Compose, pack registry.
 12. **M12 · Publish:** LoCoMo and LongMemEval results, decision-prediction and cross-agent evaluations, paper draft.
+
+Every remaining item, with its phase and size, is in the [backlog](docs/backlog.md).
 
 **Research track** (off by default): sparse codes and thought paths, GNN link prediction, Monte Carlo dreaming, sandboxed executable procedures, v2 neuroscience mechanisms, Engram Cloud with CRDT sync.
 
