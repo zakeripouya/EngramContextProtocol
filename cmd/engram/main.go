@@ -31,6 +31,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/zakeripouya/EngramContextProtocol/conformance"
 	"github.com/zakeripouya/EngramContextProtocol/internal/bootstrap"
 	"github.com/zakeripouya/EngramContextProtocol/internal/dashboard"
 	"github.com/zakeripouya/EngramContextProtocol/internal/ecp"
@@ -76,6 +77,8 @@ Usage:
   engram serve --http ADDR                serve native ECP (/ecp) and MCP (/mcp) over HTTP, e.g. 127.0.0.1:7079
   engram token create CLIENT [--service]  issue a bearer token for HTTP clients (shown once)
   engram token list | revoke CLIENT|PREFIX
+  engram conformance --url URL --token T  check any ECP server against the spec over HTTP
+  engram conformance -- COMMAND [ARGS]    ... or over stdio, starting the server with COMMAND
   engram setup HOST                       print connection instructions: claude-code, claude-desktop, codex, cursor
   engram sessions [open|done|all]         list tasks agents checkpointed
   engram session show ID                  show one task's checkpoint
@@ -164,6 +167,8 @@ func run(args []string) error {
 		return setup(rest)
 	case "snapshot":
 		return runSnapshot(rest)
+	case "conformance":
+		return runConformance(rest)
 	}
 
 	st, err := store.Open(dbPath())
@@ -1160,4 +1165,39 @@ func runToken(st *store.Store, args []string) error {
 		return nil
 	}
 	return fmt.Errorf("usage: engram token create CLIENT [--service] | list | revoke CLIENT|PREFIX")
+}
+
+func runConformance(args []string) error {
+	fs := flag.NewFlagSet("conformance", flag.ContinueOnError)
+	url := fs.String("url", "", "the server's ECP HTTP endpoint, such as http://127.0.0.1:7079/ecp")
+	token := fs.String("token", os.Getenv("ECP_TOKEN"), "bearer token (or ECP_TOKEN)")
+	client := fs.String("client", "conformance", "the client identity the server should attribute writes to")
+	ns := fs.String("ns", "conformance/test", "a namespace the client may read and write")
+	denied := fs.String("denied", "conformance/denied", "a namespace the client may not access")
+	asJSON := fs.Bool("json", false, "print the report as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	t := conformance.Target{URL: *url, Token: *token, Command: fs.Args(), Client: *client, Namespace: *ns, Denied: *denied}
+	if t.URL == "" && len(t.Command) == 0 {
+		return fmt.Errorf(`usage: engram conformance --url URL --token TOKEN | engram conformance -- COMMAND [ARGS]
+
+Pair the client first, for example:
+  engram pair conformance --read conformance/test --write conformance/test
+  engram conformance -- engram serve --client conformance`)
+	}
+	rep, err := conformance.Run(context.Background(), t)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		b, _ := json.MarshalIndent(rep, "", "  ")
+		fmt.Println(string(b))
+	} else {
+		rep.Print(os.Stdout)
+	}
+	if n := rep.Failed(conformance.Must); n > 0 {
+		return fmt.Errorf("%d MUST requirement(s) failed", n)
+	}
+	return nil
 }

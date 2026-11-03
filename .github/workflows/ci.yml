@@ -30,3 +30,35 @@ jobs:
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
         run: test -z "$(gofmt -l .)"
+
+  sdks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Schema copy is in sync
+        run: diff spec/schema.ts sdk/typescript/src/schema.ts
+      - name: TypeScript and Python SDKs against a live server
+        run: sdk/test.sh
+
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Engram passes the ECP conformance suite over stdio
+        run: |
+          go build -o engram ./cmd/engram
+          export ENGRAM_DB="$RUNNER_TEMP/engram.db" ENGRAM_EMBED=hash ENGRAM_LLM=off
+          ./engram pair conformance --read conformance/test --write conformance/test
+          ./engram conformance -- ./engram serve --client conformance

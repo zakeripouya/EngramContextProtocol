@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "engram-ecp"
+version = "0.1.0"
+description = "Python client for the Engram Context Protocol (ECP), over HTTP or stdio"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+dependencies = []
+
+[project.urls]
+Source = "https://github.com/zakeripouya/EngramContextProtocol"
+
+[tool.setuptools]
+packages = ["engram_ecp"]

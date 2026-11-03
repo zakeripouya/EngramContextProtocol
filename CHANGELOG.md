@@ -17,6 +17,10 @@ Engine milestone M11: packaging and protocol (in progress).
 - `engram serve` detects the protocol from the first message on stdio (native ECP or MCP). `engram serve --http ADDR` serves native ECP at `/ecp` (POST, an SSE stream on GET, DELETE) and MCP at `/mcp` (Streamable HTTP).
 - Bearer tokens: `engram token create CLIENT [--service] | list | revoke`. Tokens are stored hashed, and the token, not `clientInfo`, decides identity. Service tokens write as `author: "system"`.
 
+- **Conformance suite** (`conformance/`, `engram conformance --url URL --token T` or `engram conformance -- COMMAND`): 27 checks of the spec's lifecycle, JSON-RPC, memory, provenance, bitemporal, scope and optional-capability requirements, over HTTP or stdio, against any ECP server. Engram passes all applicable checks on both transports, and CI runs the suite.
+- **SDKs**: Go (`sdk/go/ecpclient`), TypeScript (`sdk/typescript`, Node 20+) and Python (`sdk/python`, 3.9+), with no runtime dependencies, over HTTP or stdio, including notifications. `sdk/test.sh` runs the TypeScript and Python suites against a live server.
+- Ending an HTTP session (`DELETE /ecp`) closes its event stream.
+
 ### Fixed
 
 - The static report failed to render nights with distilled facts (it read a field that doesn't exist).

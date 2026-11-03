@@ -214,6 +214,8 @@ func (s *Server) serveECP(w http.ResponseWriter, r *http.Request) {
 			case <-done:
 				sess.Detach()
 				return
+			case <-sess.end:
+				return
 			case <-keepAlive.C:
 				mu.Lock()
 				_, err := io.WriteString(w, ": keep-alive\n\n")

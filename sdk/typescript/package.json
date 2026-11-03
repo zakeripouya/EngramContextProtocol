@@ -1,0 +1,21 @@
+{
+  "name": "engram-ecp",
+  "version": "0.1.0",
+  "description": "TypeScript client for the Engram Context Protocol (ECP), over HTTP or stdio",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": ["dist/src"],
+  "engines": { "node": ">=20" },
+  "repository": { "type": "git", "url": "https://github.com/zakeripouya/EngramContextProtocol", "directory": "sdk/typescript" },
+  "scripts": {
+    "sync-schema": "cp ../../spec/schema.ts src/schema.ts",
+    "build": "tsc -p .",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

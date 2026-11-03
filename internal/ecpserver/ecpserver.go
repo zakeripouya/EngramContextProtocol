@@ -75,6 +75,8 @@ type Session struct {
 	send        func([]byte) error // nil while no stream is attached
 	queue       [][]byte           // notifications held until a stream attaches (HTTP)
 	lastSeen    time.Time
+	end         chan struct{} // closed when the session ends, to release its stream
+	endOnce     sync.Once
 }
 
 // NewSession registers a session. client and service are set when the transport
@@ -83,7 +85,7 @@ func (s *Server) NewSession(client string, service bool) *Session {
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)
 	sess := &Session{ID: hex.EncodeToString(b), client: client, fixed: client != "", service: service,
-		subs: map[string]time.Time{}, lastSeen: time.Now()}
+		subs: map[string]time.Time{}, lastSeen: time.Now(), end: make(chan struct{})}
 	s.mu.Lock()
 	s.sessions[sess.ID] = sess
 	s.mu.Unlock()
@@ -109,6 +111,7 @@ func (s *Server) Close(sess *Session) {
 	}
 	sess.send = nil
 	sess.mu.Unlock()
+	sess.endOnce.Do(func() { close(sess.end) })
 	s.st.DropSubscriptions(ids)
 }
 
