@@ -129,7 +129,7 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 ## 11. Storage, caching, sync and observability
 
 - [ ] `Store` interface with a shared test suite, then a Postgres backend with `pgvector` and row-level security. `M11` `L`
-- [ ] Vector index: `sqlite-vec` or HNSW. Search is brute force over stored vectors today, capped at 5,000 candidates, so the 100k-memory target isn't met yet. `M11` `M`
+- [x] Vector index: exact in-memory index plus an FTS4 full-text index for candidates (0.11.0); recall at 100k memories measured at p50 46 ms on 2 cores. `M11` `M`
 - [ ] Caching ("myelination"): embedding cache, hot subgraph, precomputed paths between busy hubs, recall and attend results, and LLM outputs, invalidated per graph region; batched Hebbian updates. `v2` `L`
 - [ ] Sync between devices and teammates with CRDTs; weight changes as additive deltas. `research` `L`
 - [ ] OpenTelemetry: latency, cache hits, cycle duration, health bounds, LLM cost. `v2` `M`

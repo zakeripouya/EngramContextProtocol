@@ -2,6 +2,15 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.11.0] - unreleased
+
+Engine milestone M11: packaging and protocol (in progress).
+
+### Added
+
+- Recall scales past 5,000 memories: an FTS4 full-text index (Porter stemmer, in the default SQLite build) and an exact in-memory vector index supply candidates, and spreading activation loads neighbors on demand. Measured at 100,000 memories on 2 CPU cores: p50 46 ms, p95 69 ms (`ENGRAM_SCALE=1 go test -run RecallLatency100k ./internal/store/`).
+- The vector index refreshes incrementally from the database, so memories written by other processes (hooks, the trigger listener, jobs) are found without a restart. kNN wiring on insert uses the same index.
+
 ## [0.10.0] - 2026-11-03
 
 Engine milestone M10: the dashboard. This completes milestones M1 to M10.

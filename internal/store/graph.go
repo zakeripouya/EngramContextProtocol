@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"sort"
 	"time"
 
 	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
@@ -64,42 +63,28 @@ func decodeVec(b []byte) []float32 {
 	return v
 }
 
-type vecRow struct {
-	id  string
-	vec []float32
-}
-
-// vectorsIn loads vectors of the current model for the given namespaces (nil = all), current memories only.
-func (s *Store) vectorsIn(namespaces []string, all bool, exclude string) ([]vecRow, error) {
-	if s.emb == nil {
-		return nil, nil
+// currentIDs reports which of the hits are current (not archived or superseded).
+func (s *Store) currentIDs(hits []hit) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(hits) == 0 {
+		return out, nil
 	}
-	q := `SELECT v.memory_id, v.vec FROM vectors v JOIN memories m ON m.id = v.memory_id
-		WHERE v.model = ? AND m.id <> ? AND (m.valid_to IS NULL OR m.valid_to > ?)`
-	args := []any{s.emb.Model(), exclude, ts(Now())}
-	if !all {
-		if len(namespaces) == 0 {
-			return nil, nil
-		}
-		q += ` AND m.namespace IN (` + placeholders(len(namespaces)) + `)`
-		args = append(args, toAny(namespaces)...)
+	ids := make([]string, len(hits))
+	for i, h := range hits {
+		ids[i] = h.id
 	}
-	q += ` ORDER BY m.created_at DESC LIMIT ?`
-	args = append(args, maxCandidates)
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.Query(`SELECT id FROM memories WHERE id IN (`+placeholders(len(ids))+`) AND (valid_to IS NULL OR valid_to > ?)`,
+		append(toAny(ids), ts(Now()))...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []vecRow
 	for rows.Next() {
-		var r vecRow
-		var b []byte
-		if err := rows.Scan(&r.id, &b); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		r.vec = decodeVec(b)
-		out = append(out, r)
+		out[id] = true
 	}
 	return out, rows.Err()
 }
@@ -121,23 +106,24 @@ func (s *Store) embedAndLink(ctx context.Context, id, namespace, content string)
 		id, s.emb.Model(), len(vec), encodeVec(vec)); err != nil {
 		return 0, false, err
 	}
-	others, err := s.vectorsIn([]string{namespace}, false, id)
+	// Wire to the k nearest current neighbors in the same namespace. The index may
+	// return archived memories, so ask for extra and keep only current ones.
+	found, err := s.searchVectors(vec, map[string]bool{namespace: true}, s.learn.K*3, s.learn.MinSimilarity, id)
 	if err != nil {
 		return 0, true, err
 	}
-	type nb struct {
-		id  string
-		sim float64
+	current, err := s.currentIDs(found)
+	if err != nil {
+		return 0, true, err
 	}
-	var nbs []nb
-	for _, o := range others {
-		if sim := embed.Cosine(vec, o.vec); sim >= s.learn.MinSimilarity {
-			nbs = append(nbs, nb{o.id, sim})
+	var nbs []hit
+	for _, f := range found {
+		if current[f.id] {
+			nbs = append(nbs, f)
 		}
-	}
-	sort.Slice(nbs, func(i, j int) bool { return nbs[i].sim > nbs[j].sim })
-	if len(nbs) > s.learn.K {
-		nbs = nbs[:s.learn.K]
+		if len(nbs) == s.learn.K {
+			break
+		}
 	}
 	for _, n := range nbs {
 		if err := s.AddEdge(id, n.id, "similar", n.sim); err != nil {

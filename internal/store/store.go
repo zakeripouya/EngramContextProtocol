@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -247,6 +248,29 @@ var migrations = []string{
 	  verdict   TEXT NOT NULL,
 	  at        TEXT NOT NULL
 	);`,
+	// 10 (M11): full-text index for keyword candidates at scale. FTS4 with the Porter
+	// stemmer ships in the default SQLite build (FTS5 would need a build tag).
+	`CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts4(id, body, notindexed=id, tokenize=porter);
+	INSERT INTO memories_fts(id, body) SELECT id, content || ' ' || tags FROM memories;
+	CREATE TRIGGER IF NOT EXISTS memories_fts_ai AFTER INSERT ON memories BEGIN
+	  INSERT INTO memories_fts(id, body) VALUES (new.id, new.content || ' ' || new.tags);
+	END;
+	CREATE TRIGGER IF NOT EXISTS memories_fts_ad AFTER DELETE ON memories BEGIN
+	  DELETE FROM memories_fts WHERE id = old.id;
+	END;
+	CREATE TRIGGER IF NOT EXISTS memories_fts_au AFTER UPDATE OF content, tags ON memories BEGIN
+	  UPDATE memories_fts SET body = new.content || ' ' || new.tags WHERE id = new.id;
+	END;`,
+	// 11 (M11): a change counter for the vector index. Inserts are seen through
+	// max(rowid); deletes and updates bump the epoch and force a rebuild.
+	`CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
+	INSERT OR IGNORE INTO counters(name, value) VALUES ('vectors_epoch', 0);
+	CREATE TRIGGER IF NOT EXISTS vectors_epoch_ad AFTER DELETE ON vectors BEGIN
+	  UPDATE counters SET value = value + 1 WHERE name = 'vectors_epoch';
+	END;
+	CREATE TRIGGER IF NOT EXISTS vectors_epoch_au AFTER UPDATE ON vectors BEGIN
+	  UPDATE counters SET value = value + 1 WHERE name = 'vectors_epoch';
+	END;`,
 }
 
 // Accepted values (spec, "Data types").
@@ -257,8 +281,15 @@ var (
 	namespaceRE     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)*$`)
 )
 
-// maxCandidates bounds how many memories M1 ranks per recall. Embedding search in M2 removes this limit.
+// maxCandidates bounds how many memories a full scan ranks per recall.
 const maxCandidates = 5000
+
+// FullScanLimit is the store size up to which recall ranks every memory. Above it,
+// recall ranks candidates from the full-text and vector indexes (M11).
+var FullScanLimit = maxCandidates
+
+// candidatesPerSource is how many candidates each index contributes.
+const candidatesPerSource = 300
 
 // Now is the clock; tests may replace it.
 var Now = func() time.Time { return time.Now().UTC() }
@@ -363,6 +394,9 @@ type Store struct {
 	emb   embed.Embedder
 	learn Learning
 	path  string
+
+	idxOnce sync.Once
+	idx     *vecIndex // in-memory vector index, refreshed from the vectors table
 }
 
 // Open opens (creating if needed) the database at path. Use ":memory:" for tests.
@@ -932,39 +966,75 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		where = append(where, "(m.valid_to IS NULL OR m.valid_to > ?)")
 		args = append(args, ts(Now()))
 	}
-	args = append([]any{model}, args...)
-	args = append(args, maxCandidates)
-	rows, err := s.db.Query(`SELECT `+memoryColumnsM+`, m.activations, v.vec FROM memories m
-		LEFT JOIN vectors v ON v.memory_id = m.id AND v.model = ?
-		WHERE `+strings.Join(where, " AND ")+` ORDER BY m.created_at DESC LIMIT ?`, args...)
-	if err != nil {
-		return nil, err
-	}
 	var mems []Memory
 	var vecs [][]float32
 	var docs []doc
 	var acts []int
-	for rows.Next() {
-		var vb []byte
-		var n int
-		m, err := scanMemoryWith(rows, &n, &vb)
+	// load appends the memories matching this query's filters (plus extra, an
+	// additional condition) and reports how many it added.
+	load := func(extra string, extraArgs []any, tail string) (int, error) {
+		q := `SELECT ` + memoryColumnsM + `, m.activations, v.vec FROM memories m
+			LEFT JOIN vectors v ON v.memory_id = m.id AND v.model = ?
+			WHERE ` + strings.Join(where, " AND ") + extra + tail
+		all := append(append([]any{model}, args...), extraArgs...)
+		rows, err := s.db.Query(q, all...)
 		if err != nil {
-			rows.Close()
+			return 0, err
+		}
+		defer rows.Close()
+		added := 0
+		for rows.Next() {
+			var vb []byte
+			var n int
+			m, err := scanMemoryWith(rows, &n, &vb)
+			if err != nil {
+				return added, err
+			}
+			if len(in.Tags) > 0 && !overlaps(m.Tags, in.Tags) {
+				continue
+			}
+			mems = append(mems, m)
+			acts = append(acts, n)
+			if len(vb) > 0 {
+				vecs = append(vecs, decodeVec(vb))
+			} else {
+				vecs = append(vecs, nil)
+			}
+			docs = append(docs, newDoc(m.Content+" "+strings.Join(m.Tags, " ")))
+			added++
+		}
+		return added, rows.Err()
+	}
+	// Small memories are ranked in full. Large ones rank a candidate set from the
+	// full-text and vector indexes, and spreading loads neighbors on demand.
+	var total int
+	if err := s.db.QueryRow(`SELECT count(*) FROM memories`).Scan(&total); err != nil {
+		return nil, err
+	}
+	candidates := total > FullScanLimit
+	if !candidates {
+		if _, err := load("", []any{maxCandidates}, ` ORDER BY m.created_at DESC LIMIT ?`); err != nil {
 			return nil, err
 		}
-		if len(in.Tags) > 0 && !overlaps(m.Tags, in.Tags) {
-			continue
+	} else {
+		var allowedSet map[string]bool
+		if !all {
+			allowedSet = map[string]bool{}
+			for _, ns := range allowed {
+				allowedSet[ns] = true
+			}
 		}
-		mems = append(mems, m)
-		acts = append(acts, n)
-		if len(vb) > 0 {
-			vecs = append(vecs, decodeVec(vb))
-		} else {
-			vecs = append(vecs, nil)
+		ids, err := s.candidateIDs(query, qvec, allowedSet)
+		if err != nil {
+			return nil, err
 		}
-		docs = append(docs, newDoc(m.Content+" "+strings.Join(m.Tags, " ")))
+		if len(ids) > 0 {
+			if _, err := load(` AND m.id IN (`+placeholders(len(ids))+`)`, toAny(ids), ""); err != nil {
+				return nil, err
+			}
+		}
 	}
-	rows.Close()
+	rejected := map[string]bool{} // ids already looked up that fail this query's filters
 
 	// Direct relevance: keywords and, when available, vector similarity.
 	kw := bm25(query, docs)
@@ -1057,6 +1127,33 @@ func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]S
 		nbs, err := s.neighbors(ids)
 		if err != nil {
 			return nil, err
+		}
+		if candidates { // load neighbors that weren't candidates, if they pass the filters
+			var missing []string
+			seen := map[string]bool{}
+			for _, list := range nbs {
+				for _, n := range list {
+					if _, ok := index[n.id]; !ok && !rejected[n.id] && !seen[n.id] {
+						missing = append(missing, n.id)
+						seen[n.id] = true
+					}
+				}
+			}
+			if len(missing) > 0 {
+				before := len(mems)
+				if _, err := load(` AND m.id IN (`+placeholders(len(missing))+`)`, toAny(missing), ""); err != nil {
+					return nil, err
+				}
+				for i := before; i < len(mems); i++ {
+					index[mems[i].ID] = i
+					prior = append(prior, 0.6*mems[i].Strength+0.4*baseLevel(acts[i], mems[i].CreatedAt, now))
+				}
+				for _, id := range missing {
+					if _, ok := index[id]; !ok {
+						rejected[id] = true
+					}
+				}
+			}
 		}
 		var next []int
 		for _, si := range frontier {
@@ -1241,3 +1338,45 @@ func toAny(ss []string) []any {
 }
 
 func round4(f float64) float64 { return float64(int(f*10000+0.5)) / 10000 }
+
+// candidateIDs gathers recall candidates from the full-text index (all query words
+// first, then any of them) and the vector index.
+func (s *Store) candidateIDs(query []string, qvec []float32, allowed map[string]bool) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	add := func(id string) {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	if len(query) > 0 {
+		uniq := dedupeSorted(query)
+		for _, expr := range []string{strings.Join(uniq, " "), strings.Join(uniq, " OR ")} {
+			rows, err := s.db.Query(`SELECT id FROM memories_fts WHERE body MATCH ? LIMIT ?`, expr, candidatesPerSource)
+			if err != nil {
+				return nil, err
+			}
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return nil, err
+				}
+				add(id)
+			}
+			rows.Close()
+			if len(out) >= candidatesPerSource/2 || len(uniq) == 1 {
+				break
+			}
+		}
+	}
+	hits, err := s.searchVectors(qvec, allowed, candidatesPerSource, s.learn.MinSimilarity, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, h := range hits {
+		add(h.id)
+	}
+	return out, nil
+}
