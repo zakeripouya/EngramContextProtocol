@@ -15,6 +15,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -33,6 +35,7 @@ import (
 	"github.com/zakeripouya/EngramContextProtocol/internal/server"
 	"github.com/zakeripouya/EngramContextProtocol/internal/sleep"
 	"github.com/zakeripouya/EngramContextProtocol/internal/store"
+	"github.com/zakeripouya/EngramContextProtocol/internal/trigger"
 )
 
 const usage = `engram: shared memory for AI agents (ECP %s reference server, v%s)
@@ -66,6 +69,13 @@ Usage:
   engram setup HOST                       print connection instructions: claude-code, claude-desktop, codex, cursor
   engram sessions [open|done|all]         list tasks agents checkpointed
   engram session show ID                  show one task's checkpoint
+  engram trigger add NAME [--kind webhook|github|job] [--ns NAMESPACE]
+                                          create an event source; prints its secret once
+  engram trigger list | events [NAME] | pause NAME | resume NAME | remove NAME
+  engram listen [--addr 127.0.0.1:7077]   receive webhooks and job results for triggers
+  engram job run NAME -- COMMAND [ARGS]   run an existing job unchanged and record its outcome
+  engram job report NAME --status ok|failed [--summary TEXT]
+                                          record the outcome of a job that ran elsewhere
   engram version                          print the version
 
 Database: $ENGRAM_DB, or ~/.engram/engram.db
@@ -145,7 +155,7 @@ func run(args []string) error {
 		return err
 	}
 	defer st.Close()
-	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "pack" || cmd == "sleep" || cmd == "selftest" {
+	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "pack" || cmd == "sleep" || cmd == "selftest" || cmd == "listen" || cmd == "job" {
 		e, note := embed.New(context.Background(), embed.FromEnv())
 		st.SetEmbedder(e)
 		fmt.Fprintln(os.Stderr, "engram:", note) // stderr: stdout carries the MCP protocol
@@ -160,7 +170,14 @@ func run(args []string) error {
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
-		return server.New(st, *client).Run(ctx, &mcp.StdioTransport{})
+		srv := server.New(st, *client)
+		wctx, cancel := context.WithCancel(ctx)
+		watched := make(chan struct{})
+		go func() { srv.Watch(wctx, 2*time.Second); close(watched) }()
+		err := srv.Run(ctx, &mcp.StdioTransport{})
+		cancel()
+		<-watched // drop this connection's subscriptions before exiting
+		return err
 
 	case "pair":
 		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
@@ -293,6 +310,25 @@ func run(args []string) error {
 		b, _ := json.MarshalIndent(c, "", "  ")
 		fmt.Println(string(b))
 		return nil
+
+	case "trigger":
+		return runTrigger(st, rest)
+
+	case "listen":
+		fs := flag.NewFlagSet("listen", flag.ContinueOnError)
+		addr := fs.String("addr", "127.0.0.1:7077", "address to listen on; keep it on loopback unless a reverse proxy adds TLS")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		if host, _, err := net.SplitHostPort(*addr); err == nil && host != "127.0.0.1" && host != "localhost" && host != "::1" {
+			fmt.Fprintln(os.Stderr, "engram: warning: listening beyond this machine; put TLS in front (every request is still authenticated)")
+		}
+		fmt.Fprintf(os.Stderr, "engram: listening on http://%s (POST /hooks/NAME, POST /jobs/NAME)\n", *addr)
+		hs := &http.Server{Addr: *addr, Handler: trigger.Handler(st), ReadHeaderTimeout: 10 * time.Second}
+		return hs.ListenAndServe()
+
+	case "job":
+		return runJob(st, rest)
 
 	case "health":
 		asJSON := len(rest) > 0 && rest[0] == "--json"
@@ -736,4 +772,127 @@ func printHealth(r health.Report) {
 	for _, u := range r.Unknown {
 		fmt.Println("  not yet measurable:", u)
 	}
+}
+
+func runTrigger(st *store.Store, args []string) error {
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "add":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: engram trigger add NAME [--kind webhook|github|job] [--ns NAMESPACE]")
+		}
+		fs := flag.NewFlagSet("trigger add", flag.ContinueOnError)
+		kind := fs.String("kind", "webhook", "webhook, github or job")
+		ns := fs.String("ns", "", "namespace for its events; default flow/NAME")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		t, err := st.AddTrigger(args[1], *kind, *ns)
+		if err != nil {
+			return err
+		}
+		path := "/hooks/" + t.Name
+		if t.Kind == store.TriggerJob {
+			path = "/jobs/" + t.Name
+		}
+		fmt.Printf("Created %s trigger %q writing to %s.\n", t.Kind, t.Name, t.Namespace)
+		fmt.Printf("Secret (shown once): %s\n", t.Secret)
+		fmt.Printf("Endpoint (with engram listen running): http://127.0.0.1:7077%s\n", path)
+		if t.Kind == store.TriggerGitHub {
+			fmt.Println("In GitHub: Settings, Webhooks: content type application/json, this secret, and the events you want.")
+		} else {
+			fmt.Printf("Example: curl -X POST -H 'Authorization: Bearer %s' -d '{\"title\":\"Deploy failed\",\"status\":\"failed\"}' http://127.0.0.1:7077%s\n", t.Secret, path)
+		}
+		fmt.Printf("Agents see its events once allowed to read it: engram pair claude-code --read %s\n", t.Namespace)
+		return nil
+	case "list":
+		ts, err := st.Triggers()
+		if err != nil {
+			return err
+		}
+		if len(ts) == 0 {
+			fmt.Println("No triggers. Create one with: engram trigger add NAME")
+		}
+		for _, t := range ts {
+			state := "active"
+			if t.Paused {
+				state = "paused"
+			}
+			fmt.Printf("%-24s %-8s %-28s %-7s fired %d (failed %d)  last %s\n", t.Name, t.Kind, t.Namespace, state, t.Fired, t.Failed, t.LastFiredAt)
+		}
+		return nil
+	case "events":
+		name := ""
+		if len(args) > 1 {
+			name = args[1]
+		}
+		evs, err := st.TriggerEvents(name, 30)
+		if err != nil {
+			return err
+		}
+		for _, e := range evs {
+			fmt.Printf("%s  %-20s %-12s notified %d  %s\n", e.At, e.Trigger, e.Status, e.Notified, e.Summary)
+		}
+		return nil
+	case "pause", "resume":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: engram trigger %s NAME", args[0])
+		}
+		return st.PauseTrigger(args[1], args[0] == "pause")
+	case "remove":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: engram trigger remove NAME")
+		}
+		return st.RemoveTrigger(args[1])
+	}
+	return fmt.Errorf("unknown trigger command %q", args[0])
+}
+
+func runJob(st *store.Store, args []string) error {
+	if len(args) >= 3 && args[0] == "run" {
+		name, argv := args[1], args[2:]
+		if argv[0] == "--" {
+			argv = argv[1:]
+		}
+		res, err := trigger.RunJob(context.Background(), st, name, argv, os.Stdout, os.Stderr)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "engram: could not record the job:", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "engram: recorded job %s (exit %d, %s), notified %d subscriber(s)\n",
+				name, res.ExitCode, res.Duration.Round(time.Millisecond), len(res.Notified))
+		}
+		if res.ExitCode != 0 {
+			st.Close()
+			os.Exit(res.ExitCode) // pass the job's exit code through to cron
+		}
+		return nil
+	}
+	if len(args) >= 2 && args[0] == "report" {
+		fs := flag.NewFlagSet("job report", flag.ContinueOnError)
+		status := fs.String("status", "", "ok or failed")
+		summary := fs.String("summary", "", "one line about the outcome")
+		output := fs.String("output", "", "details, such as the end of the log")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		if *status != "ok" && *status != "failed" {
+			return fmt.Errorf("--status must be ok or failed")
+		}
+		name := args[1]
+		if _, err := st.GetTrigger(name); err != nil {
+			if _, err := st.AddTrigger(name, store.TriggerJob, ""); err != nil {
+				return err
+			}
+		}
+		res, err := trigger.Record(st, trigger.Event{Trigger: name, Title: trigger.JobTitle(name, *status, *summary, 0),
+			Body: *output, Status: *status, Tags: []string{"job"}})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Recorded %s, notified %d subscriber(s)\n", res.MemoryID, len(res.Notified))
+		return nil
+	}
+	return fmt.Errorf("usage: engram job run NAME -- COMMAND [ARGS] | engram job report NAME --status ok|failed [--summary TEXT]")
 }

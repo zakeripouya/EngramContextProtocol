@@ -174,6 +174,7 @@ export interface ObserveParams {
   author?: Author; // default "agent"; a decision requires "user"
   validFrom?: string;
   supersedes?: string; // id of an older memory this replaces; it stops being current
+  contradicts?: string[]; // ids of current memories this disagrees with; kept as a conflict until resolved
 }
 export interface ObserveResult {
   id: string;
@@ -221,6 +222,17 @@ export interface AttendParams {
 export interface AttendResult {
   memories: ScoredMemory[];
   conflicts: { a: string; b: string; summary: string }[];
+  pending?: PendingNotification[]; // unread push notifications for this client
+}
+/** A stored push, as returned by attend and by reading engram://attention over MCP. */
+export interface PendingNotification {
+  id: number;
+  subscriptionId: string;
+  eventId: string; // the episode that triggered it
+  reason: string;
+  salience: number;
+  memories: Memory[]; // the event and related memories the subscriber may read
+  createdAt: string;
 }
 
 export interface FeedbackParams {
@@ -242,6 +254,7 @@ export interface SubscribeParams {
   context: string;
   tags?: string[];
   threshold?: number; // minimum salience 0..1, default 0.6
+  namespaces?: string[]; // only events in these namespaces; each must be readable
 }
 export interface SubscribeResult {
   subscriptionId: string;

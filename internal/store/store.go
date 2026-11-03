@@ -168,6 +168,51 @@ var migrations = []string{
 	CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_id);
 	CREATE INDEX IF NOT EXISTS sessions_ns ON sessions(namespace, status);
 	CREATE INDEX IF NOT EXISTS memories_session ON memories(session_id);`,
+	// 7 (M8): attend conflicts, subscriptions, notifications and triggers.
+	`CREATE TABLE IF NOT EXISTS subscriptions (
+	  id           TEXT PRIMARY KEY,
+	  client       TEXT NOT NULL,
+	  context      TEXT NOT NULL,
+	  tags         TEXT NOT NULL,
+	  namespaces   TEXT NOT NULL,
+	  threshold    REAL NOT NULL,
+	  created_at   TEXT NOT NULL,
+	  heartbeat_at TEXT NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS subscription_sent (
+	  subscription_id TEXT NOT NULL,
+	  memory_id       TEXT NOT NULL,
+	  PRIMARY KEY (subscription_id, memory_id)
+	);
+	CREATE TABLE IF NOT EXISTS notifications (
+	  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	  subscription_id TEXT NOT NULL,
+	  client          TEXT NOT NULL,
+	  event_id        TEXT NOT NULL,
+	  memory_ids      TEXT NOT NULL,
+	  reason          TEXT NOT NULL,
+	  salience        REAL NOT NULL,
+	  created_at      TEXT NOT NULL,
+	  read_at         TEXT
+	);
+	CREATE INDEX IF NOT EXISTS notifications_client ON notifications(client, read_at);
+	CREATE TABLE IF NOT EXISTS triggers (
+	  name       TEXT PRIMARY KEY,
+	  kind       TEXT NOT NULL,
+	  namespace  TEXT NOT NULL,
+	  secret     TEXT NOT NULL,
+	  paused     INTEGER NOT NULL DEFAULT 0,
+	  created_at TEXT NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS trigger_events (
+	  trigger   TEXT NOT NULL,
+	  at        TEXT NOT NULL,
+	  memory_id TEXT,
+	  status    TEXT NOT NULL,
+	  notified  INTEGER NOT NULL DEFAULT 0,
+	  summary   TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS trigger_events_by ON trigger_events(trigger, at);`,
 }
 
 // Accepted values (spec, "Data types").
@@ -765,24 +810,30 @@ func (s *Store) Get(client string, ids []string) ([]Memory, error) {
 
 // Recall returns the memories most related to the query that the client may read.
 func (s *Store) Recall(client string, in RecallInput) ([]Scored, error) {
-	return s.recall(client, in, false)
+	return s.recall(client, in, true, true)
 }
 
 // RecallSystem searches every namespace (or in.Namespaces) without grants and without
 // side effects: no activation counts, no Hebbian updates, no audit entry. The sleep
 // cycle uses it to test itself without changing what it is testing.
 func (s *Store) RecallSystem(in RecallInput) ([]Scored, error) {
-	return s.recall("engram-sleep", in, true)
+	return s.recall("engram-sleep", in, false, false)
 }
 
-func (s *Store) recall(client string, in RecallInput, system bool) ([]Scored, error) {
+// RecallQuiet checks the client's grants like Recall but has no side effects. Attend
+// and push notifications use it, so that being shown something does not train pathways.
+func (s *Store) RecallQuiet(client string, in RecallInput) ([]Scored, error) {
+	return s.recall(client, in, true, false)
+}
+
+func (s *Store) recall(client string, in RecallInput, grants, effects bool) ([]Scored, error) {
 	if in.K <= 0 {
 		in.K = 5
 	}
 	in.K = min(in.K, 50)
 	var readable []string
 	all := true
-	if !system {
+	if grants {
 		var err error
 		if readable, all, err = s.readable(client); err != nil {
 			return nil, err
@@ -1030,7 +1081,7 @@ func (s *Store) recall(client string, in RecallInput, system bool) ([]Scored, er
 			break
 		}
 	}
-	if !historical && !system && len(results) > 0 {
+	if !historical && effects && len(results) > 0 {
 		stamp := ts(now)
 		ids := make([]string, len(results))
 		for i, r := range results {
@@ -1043,7 +1094,7 @@ func (s *Store) recall(client string, in RecallInput, system bool) ([]Scored, er
 			return nil, err
 		}
 	}
-	if !system {
+	if effects {
 		detail, _ := json.Marshal(map[string]any{"q": in.Query, "n": len(results)})
 		_ = audit(s.db, client, "recall", "", string(detail))
 	}

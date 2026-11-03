@@ -2,6 +2,22 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.8.0] - 2026-11-03
+
+Engine milestone M8: triggers and push.
+
+### Added
+
+- `attend` tool: what matters now, ranked by relevance, overlap with active goals, recent change, unresolved conflicts and a kind preference; modes `detail`, `explore`, `focus` and `generalize`; at most 12 items; never trains pathways; unread notifications under `pending`.
+- Conflicts: `observe` with `contradicts` records a `conflicts` edge, surfaced by `attend` until one memory supersedes the other.
+- Triggers: `engram trigger add | list | events | pause | resume | remove`; `engram listen` serves `POST /hooks/NAME` (bearer token, or GitHub HMAC-SHA256 for workflow runs, pull requests, issues, comments and pushes) and `POST /jobs/NAME`. Rate limit of 60 events a minute, idempotent redeliveries, secret filter.
+- `engram job run NAME -- COMMAND` wraps an existing job (output and exit code pass through) and `engram job report` records one that ran elsewhere.
+- Push: `subscribe` and `unsubscribe` tools, the subscribable `engram://attention` resource with `notifications/resources/updated`, and `engram://memory/{id}`. Notifications respect the subscriber's grants, never repeat a memory for a subscription, and are rate-limited per connection.
+
+### Protocol
+
+- Additive: `ObserveParams.contradicts`, `SubscribeParams.namespaces`, `AttendResult.pending` and `PendingNotification`.
+
 ## [0.7.0] - 2026-11-03
 
 Engine milestone M7: a second agent and sessions.

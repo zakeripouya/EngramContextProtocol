@@ -162,6 +162,8 @@ Subscriptions are ECP's main addition to MCP: the server pushes to a client when
 - A server MUST NOT include memories outside the subscriber's grants.
 - A server SHOULD rate-limit `relevant` notifications per subscription (default: at most one per 30 seconds) and MUST NOT re-send a memory the subscriber already received for the same context.
 - Subscriptions end when the connection ends; clients re-subscribe after reconnecting.
+- **MCP profile.** The `subscribe` tool returns a subscription id and the resource `engram://attention`. A client subscribes to it with `resources/subscribe`; the server sends `notifications/resources/updated` when new notifications exist, and reading the resource returns them (`PendingNotification`) and marks them delivered. Servers SHOULD also return unread notifications under `pending` in `attend`, for clients without resource subscriptions.
+- **Events.** Triggers (webhooks, job results) are configured by the user outside the protocol, like pairing. Each event is stored as an `episode` with `author: "system"` and the trigger as `service`. A subscriber is notified only if it can read the event's namespace; failed events MAY raise salience.
 
 ## MCP compatibility profile
 

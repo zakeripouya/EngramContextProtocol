@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) and M7 (sessions and handoff between agents) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) and M8 (triggers, push notifications and `attend`) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
 
 ---
 
@@ -125,6 +125,11 @@ The scheduler calls `engram sleep run --if-due` every 15 minutes; it only works 
 | `engram setup claude-code` / `claude-desktop` / `codex` / `cursor` | Print connection instructions |
 | `engram sessions [open\|done\|all]` | List tasks agents checkpointed |
 | `engram session show ID` | Show one task's checkpoint |
+| `engram trigger add NAME [--kind webhook\|github\|job] [--ns NS]` | Create an event source; prints its secret once |
+| `engram trigger list` / `events [NAME]` / `pause` / `resume` / `remove` | Manage triggers and see what they fired |
+| `engram listen [--addr 127.0.0.1:7077]` | Receive webhooks (`POST /hooks/NAME`) and job results (`POST /jobs/NAME`) |
+| `engram job run NAME -- COMMAND` | Run an existing job unchanged (output and exit code pass through) and record its outcome |
+| `engram job report NAME --status ok\|failed` | Record the outcome of a job that ran elsewhere |
 | `engram version` | Print the engine and protocol versions |
 
 The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file.
@@ -169,7 +174,10 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | Sessions: `checkpoint`, `sessions`, `resume` (reports missing repo, tools and permissions), `delegate` | ✅ M7 |
 | Finished tasks become episodes; delegated results return to the parent task | ✅ M7 |
 | Setup for Codex and Cursor alongside Claude Code and Claude Desktop | ✅ M7 |
-| Triggers, push notifications, `attend` | design (M8) |
+| `attend`: salience from relevance, goals, recent change, conflicts and mode (`detail`, `explore`, `focus`, `generalize`) | ✅ M8 |
+| Conflicts kept, not merged: `observe` with `contradicts`, surfaced by `attend` | ✅ M8 |
+| Triggers: generic webhooks (bearer token), GitHub webhooks (HMAC), job results; pause, rate limit, secret filter | ✅ M8 |
+| Push: `subscribe`, updates to the `engram://attention` resource, pending events in `attend` | ✅ M8 |
 | Permission assist (shadow mode) | design (M9) |
 | Dashboard | design (M10) |
 
@@ -266,7 +274,7 @@ w_ij ← (1 − λ) · w_ij + η · a_i · a_j
 
 ## Retrieval
 
-*Implemented (M2, M4): keyword and vector seeding, ACT-R priors, multi-hop beam spreading with paths, lateral inhibition and confidence. `attend` and maximin path queries are design (M8).*
+*Implemented (M2, M4): keyword and vector seeding, ACT-R priors, multi-hop beam spreading with paths, lateral inhibition and confidence. `attend` is implemented in M8; maximin path queries are design.*
 
 1. **Seed** by dense similarity and sparse-code overlap within the caller's namespaces.
 2. **Spread** activation over `similar` and `coactive` edges for up to two hops, fan-out capped, with a 1/√degree penalty.
@@ -392,7 +400,15 @@ Every mechanism is a switchable module, phased in and kept only if an ablation s
 - **Agents reach in** through the MCP tool surface today, or ECP natively with push.
 - **Engram reaches out** ("octopus legs") as an MCP client to existing servers (GitHub, Gmail, Slack, Calendar, Linear) and turns their changes into episodes.
 - **Observers** capture agent turns through hooks (Claude Code hooks, CLI wrappers) or voluntary `observe` calls; a consented browser extension can cover assistant web apps.
-- **Triggers** *(design, M8)*: cron schedules, webhooks, Kafka or Redis Streams messages, file changes and job results activate memory; anything crossing a threshold notifies an agent, calls a webhook or runs a procedure, and the outcome feeds back. Existing automations are observed, not replaced.
+- **Triggers** *(✅ M8 for webhooks, GitHub and job results; queues, file changes and procedure runs are design)*: events activate memory; anything crossing a subscriber's threshold notifies that agent with the related memories it may read, and the outcome feeds back. Existing automations are observed, not replaced: wrap a cron entry in `engram job run payouts -- ./payouts.sh`, or have it call `engram job report`.
+
+  ```bash
+  engram trigger add gh --kind github --ns team/ink   # prints the secret for GitHub's webhook settings
+  engram listen                                       # 127.0.0.1:7077; put a tunnel or proxy with TLS in front for GitHub
+  0 2 * * * engram job run payouts -- /srv/ink/payouts.sh   # crontab: a failure reaches subscribed agents
+  ```
+
+  An agent that called `subscribe` ("working on the payouts job") gets an update to `engram://attention` carrying the failed run, the related ticket and the user's decision about retries. Clients without resource subscriptions see the same events under `pending` the next time they call `attend`.
 - **Headless and multi-model**: any program that speaks ECP or MCP is a client (a Go service, a cron job, CI, an agent on any model). The core needs no LLM; the LLM steps use a pluggable provider, including local models.
 - **Bootstrapping** *(✅ M3)*: import git history (one episode per commit, a concept per recurring file, `coactive` pathways between files that change together, and facts for detected naming conventions), Jira exports and generic JSON at low initial weight and `system` provenance, so Engram starts out knowing something. Imports are idempotent.
 
@@ -526,7 +542,7 @@ Delivery: a live local dashboard (default), a static HTML report regenerated eac
 
 ECP is JSON-RPC 2.0 over stdio or Streamable HTTP, extending MCP. The normative definition is [`spec/schema.ts`](spec/schema.ts); a generated [`spec/schema.json`](spec/schema.json) lets any language validate messages. The full prose specification is [docs/spec/ecp-v0.md](docs/spec/ecp-v0.md).
 
-**Today** the engine speaks the **MCP compatibility profile**: the methods below are exposed as MCP tools named `observe`, `recall`, `get`, `forget`, `feedback`, `checkpoint`, `sessions`, `resume` and `delegate`, with the same parameters in snake_case (`valid_from`, `as_of`, `session_id`). The native `engram/*` JSON-RPC methods are the protocol definition, which the tools mirror.
+**Today** the engine speaks the **MCP compatibility profile**: the methods below are exposed as MCP tools named `observe`, `recall`, `get`, `forget`, `feedback`, `attend`, `subscribe`, `unsubscribe`, `checkpoint`, `sessions`, `resume` and `delegate`, plus the resources `engram://attention` (subscribable) and `engram://memory/{id}`, with the same parameters in snake_case (`valid_from`, `as_of`, `session_id`). The native `engram/*` JSON-RPC methods are the protocol definition, which the tools mirror.
 
 ### Envelope
 
@@ -627,9 +643,9 @@ A feature may be used only if the relevant side declared it. Servers MUST suppor
 | `engram/get` | `get` | Fetch memories by id | ✅ M1 |
 | `engram/forget` | `forget` | Delete memories, cascading to derived ones | ✅ M1 |
 | `engram/path` | | Best path between two memories | design |
-| `engram/attend` | `attend` | What matters now for a context | design |
+| `engram/attend` | `attend` | What matters now for a context | ✅ M8 |
 | `engram/feedback` | `feedback` | Report accepts, overrides and outcomes | ✅ M4 |
-| `engram/subscribe`, `engram/unsubscribe` | resource subscription | Push notifications | design |
+| `engram/subscribe`, `engram/unsubscribe` | `subscribe`, `unsubscribe` + `engram://attention` | Push notifications | ✅ M8 |
 | `engram/consolidate` | | Trigger a sleep cycle | design |
 | `engram/session/checkpoint`, `resume`, `list`, `delegate` | `checkpoint`, `resume`, `sessions`, `delegate` | Task state shared between agents | ✅ M7 |
 
@@ -706,10 +722,14 @@ With `cascade`, memories derived only from the forgotten ones are removed too.
 
 {"jsonrpc": "2.0", "id": 6, "result": {
   "memories": [{"memory": {"id": "mem_3f9a1c2b7d4e5f60", "kind": "decision", "content": "Independent artists get a flagged shop row"}, "score": 0.91}],
-  "conflicts": [{"a": "mem_tier01", "b": "mem_flat02", "summary": "Tiered vs flat fee advice; no decision recorded"}]}}
+  "conflicts": [{"a": "mem_tier01", "b": "mem_flat02", "summary": "\"Tiered fees\" disagrees with \"Flat fee\""}],
+  "pending": [{"id": 3, "subscriptionId": "sub_4d1e", "eventId": "mem_job77", "salience": 0.86,
+    "reason": "Event Job payouts failed: exit 3 (61% related to \"payouts job\", urgent)", "memories": []}]}}
 ```
 
-`mode`: `detail`, `explore`, `focus`, `generalize`.
+`mode`: `detail` (one hop; specific episodes over distilled facts), `explore` (three hops, more items, a bonus for memories never looked at), `focus` (three hops, three items, relevance weighted most) or `generalize` (facts, traits and distilled knowledge). Salience is `relevance·w + 0.2·goal overlap + 0.15·recency (one-day half-life) + 0.1·kind preference + 0.1·in a conflict`. `attend` returns at most 12 items (4 by default), never trains pathways, and lists unread push notifications under `pending`.
+
+A conflict is recorded with `observe` and `contradicts: [ids]` when two current memories disagree and it is unclear which is right; it stays until one `supersedes` the other.
 
 #### `engram/feedback`
 
@@ -735,10 +755,10 @@ With `cascade`, memories derived only from the forgotten ones are removed too.
   "weakestLink": {"from": "mem_mid22", "to": "mem_3f9a1c2b7d4e5f60", "kind": "coactive", "weight": 0.41}}}
 ```
 
-#### `engram/subscribe` and notifications *(design)*
+#### `engram/subscribe` and notifications
 
 ```json
-{"jsonrpc": "2.0", "id": 9, "method": "engram/subscribe", "params": {"context": "Refund flow in ink", "tags": ["payments"], "threshold": 0.6}}
+{"jsonrpc": "2.0", "id": 9, "method": "engram/subscribe", "params": {"context": "Refund flow in ink", "tags": ["payments"], "namespaces": ["team/ink"], "threshold": 0.6}}
 {"jsonrpc": "2.0", "id": 9, "result": {"subscriptionId": "sub_4d1e"}}
 
 {"jsonrpc": "2.0", "method": "notifications/engram/relevant", "params": {
@@ -754,6 +774,8 @@ With `cascade`, memories derived only from the forgotten ones are removed too.
 ```
 
 Notifications go only to clients that declared the capability, never include memories outside the subscriber's grants, are rate-limited (default one per 30 seconds per subscription) and never repeat a memory for the same context.
+
+**Over MCP (implemented):** the `subscribe` tool takes the same params and returns `{"subscriptionId", "resource": "engram://attention"}`. The client subscribes to that resource with `resources/subscribe`; when an event is salient (`relevance to the context + 0.3 for a shared tag + 0.25 if it failed ≥ threshold`), the server sends `notifications/resources/updated` and reading the resource returns the notifications with their memories, marking them delivered. Events are recorded by whichever process receives them (`engram listen`, `engram job run`), so each serving process polls the store every 2 seconds and rate-limits pushes to one per 30 seconds per connection. Subscriptions end with the connection. Conflict and consolidation notifications are design.
 
 #### `engram/consolidate` *(design)*
 
