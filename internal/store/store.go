@@ -140,6 +140,19 @@ var migrations = []string{
 	  detail    TEXT,
 	  undone_at TEXT
 	);`,
+
+	// 5 (M6): nightly health metrics and the user's golden recall suite.
+	`CREATE TABLE IF NOT EXISTS health (
+	  at      TEXT NOT NULL,
+	  metrics TEXT NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS golden (
+	  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+	  query     TEXT NOT NULL,
+	  expect_id TEXT NOT NULL,
+	  namespace TEXT NOT NULL,
+	  added_at  TEXT NOT NULL
+	);`,
 }
 
 // Accepted values (spec, "Data types").
@@ -255,6 +268,7 @@ type Store struct {
 	db    *sql.DB
 	emb   embed.Embedder
 	learn Learning
+	path  string
 }
 
 // Open opens (creating if needed) the database at path. Use ":memory:" for tests.
@@ -282,7 +296,11 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, learn: DefaultLearning}, nil
+	st := &Store{db: db, learn: DefaultLearning}
+	if path != ":memory:" {
+		st.path = path
+	}
+	return st, nil
 }
 
 func migrate(db *sql.DB) error {

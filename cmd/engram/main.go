@@ -28,6 +28,7 @@ import (
 	"github.com/zakeripouya/EngramContextProtocol/internal/bootstrap"
 	"github.com/zakeripouya/EngramContextProtocol/internal/ecp"
 	"github.com/zakeripouya/EngramContextProtocol/internal/embed"
+	"github.com/zakeripouya/EngramContextProtocol/internal/health"
 	"github.com/zakeripouya/EngramContextProtocol/internal/llm"
 	"github.com/zakeripouya/EngramContextProtocol/internal/server"
 	"github.com/zakeripouya/EngramContextProtocol/internal/sleep"
@@ -58,6 +59,10 @@ Usage:
   engram sleep undo CHANGE_ID             undo one change from a cycle
   engram sleep schedule                   print the cron or launchd line that runs the cycle
   engram snapshot list | restore FILE     list snapshots, or restore one (stop agents first)
+  engram health [--json]                  check learning dynamics against healthy bounds and drift
+  engram selftest                         run golden, programmatic and mutation tests on a sandbox copy
+  engram golden add "QUERY" MEMORY_ID     add a query that must keep recalling a memory
+  engram golden list                      list golden queries
   engram setup claude-code|claude-desktop print connection instructions
   engram version                          print the version
 
@@ -138,7 +143,7 @@ func run(args []string) error {
 		return err
 	}
 	defer st.Close()
-	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "pack" || cmd == "sleep" {
+	if cmd == "serve" || cmd == "reembed" || cmd == "import" || cmd == "pack" || cmd == "sleep" || cmd == "selftest" {
 		e, note := embed.New(context.Background(), embed.FromEnv())
 		st.SetEmbedder(e)
 		fmt.Fprintln(os.Stderr, "engram:", note) // stderr: stdout carries the MCP protocol
@@ -250,6 +255,64 @@ func run(args []string) error {
 
 	case "sleep":
 		return runSleep(st, rest)
+
+	case "health":
+		asJSON := len(rest) > 0 && rest[0] == "--json"
+		r, err := health.Check(st, lastDecisionRecall(st), false)
+		if err != nil {
+			return err
+		}
+		if asJSON {
+			b, _ := json.MarshalIndent(r, "", "  ")
+			fmt.Println(string(b))
+			return nil
+		}
+		printHealth(r)
+		return nil
+
+	case "selftest":
+		results, err := health.SelfTest(context.Background(), st)
+		if err != nil {
+			return err
+		}
+		failed := 0
+		for _, r := range results {
+			mark := "pass"
+			if !r.Passed {
+				mark, failed = "FAIL", failed+1
+			}
+			fmt.Printf("  %-4s  %-12s %s", mark, r.Kind, r.Name)
+			if r.Detail != "" {
+				fmt.Printf("  (%s)", r.Detail)
+			}
+			fmt.Println()
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d of %d self-tests failed", failed, len(results))
+		}
+		fmt.Printf("All %d self-tests passed (on a sandbox copy; your memory was not changed)\n", len(results))
+		return nil
+
+	case "golden":
+		if len(rest) >= 3 && rest[0] == "add" {
+			id, err := st.AddGolden(rest[1], rest[2])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Added golden query %d\n", id)
+			return nil
+		}
+		if len(rest) == 1 && rest[0] == "list" {
+			gs, err := st.GoldenSuite()
+			if err != nil {
+				return err
+			}
+			for _, g := range gs {
+				fmt.Printf("%4d  %-40q → %s\n", g.ID, g.Query, g.ExpectID)
+			}
+			return nil
+		}
+		return fmt.Errorf(`usage: engram golden add "QUERY" MEMORY_ID | engram golden list`)
 
 	case "decay":
 		r, err := st.Decay()
@@ -436,6 +499,19 @@ func runSleep(st *store.Store, args []string) error {
 			return err
 		}
 		printReport(rep)
+		recall := -1.0
+		if rep.SelfTest.Tested > 0 {
+			recall = float64(rep.SelfTest.Found) / float64(rep.SelfTest.Tested)
+		}
+		h, err := health.Check(st, recall, true)
+		if err != nil {
+			return err
+		}
+		fmt.Println()
+		printHealth(h)
+		if h.Worst == health.Breach && rep.Snapshot != "" {
+			fmt.Printf("\nA health bound was breached. To roll back tonight's cycle: engram snapshot restore %s\n", rep.Snapshot)
+		}
 		return nil
 
 	case "report":
@@ -581,4 +657,34 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, b, 0o600)
+}
+
+func lastDecisionRecall(st *store.Store) float64 {
+	runs, err := st.Runs(1)
+	if err != nil || len(runs) == 0 || runs[0].Report == nil {
+		return -1
+	}
+	var r sleep.Report
+	if json.Unmarshal(runs[0].Report, &r) != nil || r.SelfTest.Tested == 0 {
+		return -1
+	}
+	return float64(r.SelfTest.Found) / float64(r.SelfTest.Tested)
+}
+
+func printHealth(r health.Report) {
+	fmt.Println("Health:", r.Worst)
+	for _, b := range append(append([]health.Bound{}, r.Bounds...), r.Drift...) {
+		val := fmt.Sprintf("%.2f", b.Value)
+		if b.Status == health.Unknown {
+			val = "-"
+		}
+		fmt.Printf("  %-8s %-40s %-6s limit: %s", b.Status, b.Name, val, b.Limit)
+		if b.Detail != "" {
+			fmt.Printf("  (%s)", b.Detail)
+		}
+		fmt.Println()
+	}
+	for _, u := range r.Unknown {
+		fmt.Println("  not yet measurable:", u)
+	}
 }

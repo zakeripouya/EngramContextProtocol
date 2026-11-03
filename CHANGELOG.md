@@ -2,6 +2,17 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
+## [0.6.0] - 2026-11-03
+
+Engine milestone M6: the testing harness.
+
+### Added
+
+- `engram health [--json]`: weight saturation, memories at the strength floor, largest hub degree and decision recall, each with healthy, warning and breach limits. Bounds that cannot be measured yet are listed, not faked.
+- Drift detection: the population stability index of the pathway-weight distribution against the mean of the last week. Metrics are recorded after every `engram sleep run`, and a severe breach prints the snapshot restore command.
+- `engram selftest`: runs on a sandbox copy, never the real memory. Golden queries, superseded facts not returned as current, and mutation tests (an injected duplicate must be merged, a poisoned memory with a secret refused, a runaway hub must breach the degree bound).
+- `engram golden add | list`.
+
 ## [0.5.0] - 2026-11-03
 
 Engine milestone M5: the sleep cycle.

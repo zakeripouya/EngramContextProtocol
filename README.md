@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) and M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) and M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) are implemented and tested. Everything marked *design* below is specified but not built yet. See the [roadmap](#roadmap).
 
 ---
 
@@ -119,6 +119,9 @@ The scheduler calls `engram sleep run --if-due` every 15 minutes; it only works 
 | `engram sleep undo ID` | Undo one change from a cycle |
 | `engram sleep schedule` | Print the cron or launchd line that runs cycles automatically |
 | `engram snapshot list` / `restore FILE` | List snapshots, or roll the database back to one |
+| `engram health [--json]` | Check learning dynamics against healthy bounds and drift; also runs after every sleep cycle |
+| `engram selftest` | Golden, programmatic and mutation tests on a sandbox copy of your memory |
+| `engram golden add "QUERY" ID` / `golden list` | Add a query that must keep recalling a memory |
 | `engram setup claude-code` / `claude-desktop` | Print connection instructions |
 | `engram version` | Print the engine and protocol versions |
 
@@ -158,6 +161,9 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | Hub detection and LLM distillation verified by a separate call | ✅ M5 |
 | Recall self-test on user decisions; morning report; per-change undo; snapshot restore | ✅ M5 |
 | Sleep hours with idle detection and once-a-night scheduling | ✅ M5 |
+| Health bounds: weight saturation, strength floor, hub degree, decision recall | ✅ M6 |
+| Drift detection (population stability index against the last week), recorded nightly | ✅ M6 |
+| Self-tests on a sandbox copy: golden queries, superseded facts, injected duplicate, poisoned memory, runaway hub | ✅ M6 |
 | Session handoff, second agent | design (M7) |
 | Triggers, push notifications, `attend` | design (M8) |
 | Permission assist (shadow mode) | design (M9) |
@@ -456,6 +462,8 @@ See [SECURITY.md](SECURITY.md) for the threat model and reporting.
 | Diversity | No near-duplicate results |
 | Calibration | Confidence matches accuracy |
 | Trait stability | Changes only with new evidence |
+
+*Implemented in M6: the weight-saturation, strength-floor, hub-degree and decision-recall bounds, PSI drift on the pathway-weight distribution, golden queries, and programmatic and mutation self-tests run on a sandbox copy. `engram health` lists the bounds it cannot measure yet (sparsity, forgetting-curve fit, calibration, trait stability) instead of faking them. Kolmogorov-Smirnov, automatic rollback and the adversarial agent are design; on a severe breach Engram prints the restore command.*
 
 **Drift detection** compares nightly snapshots with a rolling baseline (Kolmogorov-Smirnov, population stability index) and rolls back on severe breaches. **Self-generated tests** come from the graph itself (hide a decision and predict it), from mutation testing (inject fake duplicates, contradictions and poisoned memories into a sandbox copy) and from a small adversarial agent. Expected answers always come from raw source episodes, never distilled facts, so Engram can't pass tests against its own hallucinations.
 
@@ -832,7 +840,7 @@ Each milestone is roughly one to two weekends and has a done-check.
 
 **Phase 2 · Sleep and safety**
 5. **M5 · Sleep cycle v1** ✅ Sleep hours, verifier, morning report, undo and rollback.
-6. **M6 · Testing harness:** bounds, drift detection, generated and mutation tests.
+6. **M6 · Testing harness** ✅ Bounds, drift detection, golden, programmatic and mutation tests.
 7. **M7 · Second agent and sessions:** a task started in Claude Code finishes in Codex without re-explaining.
 
 **Phase 3 · Awareness**

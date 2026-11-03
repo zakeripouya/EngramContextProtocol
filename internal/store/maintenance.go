@@ -353,3 +353,129 @@ func shortContent(s string) string {
 
 // Short exposes shortContent to the sleep package.
 func Short(s string) string { return shortContent(s) }
+
+// ---------------------------------------------------------------- health data (M6)
+
+// DegreeMax returns the largest number of similar or coactive edges on any current memory.
+func (s *Store) DegreeMax() (int, string, error) {
+	var n int
+	var id sql.NullString
+	err := s.db.QueryRow(`SELECT id, count(*) AS d FROM (
+		SELECT src AS id FROM edges WHERE kind IN ('similar','coactive')
+		UNION ALL SELECT dst AS id FROM edges WHERE kind IN ('similar','coactive'))
+		GROUP BY id ORDER BY d DESC LIMIT 1`).Scan(&id, &n)
+	if err == sql.ErrNoRows {
+		return 0, "", nil
+	}
+	return n, id.String, err
+}
+
+// Weights returns the weights of all edges of one kind.
+func (s *Store) Weights(kind string) ([]float64, error) {
+	rows, err := s.db.Query(`SELECT weight FROM edges WHERE kind = ?`, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []float64
+	for rows.Next() {
+		var w float64
+		if err := rows.Scan(&w); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// Strengths returns the strength of every current memory.
+func (s *Store) Strengths() ([]float64, error) {
+	rows, err := s.db.Query(`SELECT strength FROM memories WHERE valid_to IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []float64
+	for rows.Next() {
+		var w float64
+		if err := rows.Scan(&w); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// SaveHealth stores one night's metrics.
+func (s *Store) SaveHealth(metrics any) error {
+	b, err := json.Marshal(metrics)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO health(at, metrics) VALUES (?,?)`, ts(Now()), string(b))
+	return err
+}
+
+// HealthHistory returns stored metrics, newest first.
+func (s *Store) HealthHistory(limit int) ([]json.RawMessage, error) {
+	rows, err := s.db.Query(`SELECT metrics FROM health ORDER BY at DESC, rowid DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []json.RawMessage
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, err
+		}
+		out = append(out, json.RawMessage(m))
+	}
+	return out, rows.Err()
+}
+
+// Golden is one query in the user's golden recall suite.
+type Golden struct {
+	ID        int64  `json:"id"`
+	Query     string `json:"query"`
+	ExpectID  string `json:"expectId"`
+	Namespace string `json:"namespace"`
+}
+
+// AddGolden records that query should recall expectID within the top three.
+func (s *Store) AddGolden(query, expectID string) (int64, error) {
+	var ns string
+	if err := s.db.QueryRow(`SELECT namespace FROM memories WHERE id = ?`, expectID).Scan(&ns); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("no memory %s", expectID)
+		}
+		return 0, err
+	}
+	res, err := s.db.Exec(`INSERT INTO golden(query, expect_id, namespace, added_at) VALUES (?,?,?,?)`,
+		query, expectID, ns, ts(Now()))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GoldenSuite returns every golden query.
+func (s *Store) GoldenSuite() ([]Golden, error) {
+	rows, err := s.db.Query(`SELECT id, query, expect_id, namespace FROM golden ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Golden
+	for rows.Next() {
+		var g Golden
+		if err := rows.Scan(&g.ID, &g.Query, &g.ExpectID, &g.Namespace); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// Path returns where an on-disk store lives ("" for in-memory).
+func (s *Store) Path() string { return s.path }
