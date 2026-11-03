@@ -26,6 +26,9 @@ gofmt -l . && go vet ./... && go test -timeout 300s ./...
 - `cmd/engram`: the CLI (serve, pair, import, sleep, health, trigger, listen, job, hook, permit, dashboard, report, ...)
 - `internal/store`: SQLite store, schema and ordered migrations (append new ones at the end of `migrations`), recall, learning, sessions, push, triggers, permits, dashboard queries
 - `internal/server`: MCP tools and resources (the ECP MCP compatibility profile) and push watcher
+- `internal/ecpserver`: native ECP (JSON-RPC engram/* methods, stdio and HTTP transports, notifications)
+- `conformance/`: the public ECP conformance suite; `sdk/` Go, TypeScript and Python clients (`sdk/test.sh` runs the TS and Python suites against a live server)
+- `internal/hosts`: agent host config writers used by `engram init`
 - `internal/sleep`, `internal/health`, `internal/trigger`, `internal/permit`, `internal/dashboard`, `internal/bootstrap`, `internal/embed`, `internal/llm`
 - `spec/` (normative TypeScript schema plus generated JSON), `docs/spec/ecp-v0.md` (prose spec), `docs/design.md`
 

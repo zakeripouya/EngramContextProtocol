@@ -6,7 +6,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer for AI agents
 
 Agents connect through the **Engram Context Protocol (ECP)**, an open protocol built on the [Model Context Protocol](https://modelcontextprotocol.io). Every ECP server is also a valid MCP server, so any MCP client can use Engram today.
 
-> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`), M9 (permission assist in shadow mode) and M10 (the local dashboard, approvals inbox and static report) are implemented and tested. Everything marked *design* below is specified but not built yet; the [backlog](docs/backlog.md) tracks every remaining item. See the [roadmap](#roadmap).
+> **Status: pre-alpha.** Milestones M1 (a working memory server), M2 (embeddings, kNN wiring, Hebbian learning and pathway recall) M3 (bootstrapping from git, Jira and pathway packs) M4 (multi-hop spreading activation, feedback and three-factor learning, ACT-R activation, lateral inhibition and confidence) M5 (the sleep cycle: snapshots, consolidation, verified distillation, self-test, morning report and undo) M6 (the testing harness: health bounds, drift detection, golden, programmatic and mutation self-tests) M7 (sessions and handoff between agents) M8 (triggers, push notifications and `attend`), M9 (permission assist in shadow mode), M10 (the local dashboard, approvals inbox and static report) and M11 (native ECP over stdio and HTTP, the conformance suite, SDKs, `engram init`, releases, Docker and the signed pack registry) are implemented and tested. Everything marked *design* below is specified but not built yet; the [backlog](docs/backlog.md) tracks every remaining item. See the [roadmap](#roadmap).
 
 ---
 
@@ -54,16 +54,22 @@ Agents connect through the **Engram Context Protocol (ECP)**, an open protocol b
 
 ## Quick start
 
-Requirements: Go 1.24 or newer and a C compiler (the SQLite driver uses cgo).
-
 ```bash
+# Install a release binary (Linux or macOS; Windows: the .zip on the releases page) ...
+curl -fsSL https://raw.githubusercontent.com/zakeripouya/EngramContextProtocol/main/install.sh | sh
+# ... or build from source (Go 1.24+ and a C compiler; the SQLite driver uses cgo)
 go install github.com/zakeripouya/EngramContextProtocol/cmd/engram@latest
 
-# 1. You approve the agent. Agents can never pair themselves.
-engram pair claude-code --read me --write me
+# Set everything up: models, agents (Claude Code, Claude Desktop, Codex, Cursor),
+# sleep hours and scheduler, the Developer pack and this repo's history.
+engram init
+```
 
-# 2. Connect Claude Code.
-claude mcp add engram -- engram serve --client claude-code
+`engram init` asks before each step (`--yes` accepts the recommended ones). It edits agents' MCP configs idempotently, with backups, and pairs them, because pairing is always your decision, never an agent's. To do it by hand instead:
+
+```bash
+engram pair claude-code --read me --write me                      # you approve the agent
+claude mcp add engram -- engram serve --client claude-code         # connect it
 ```
 
 In Claude Code, say something durable: *"Remember that branches always start with the Jira ticket number."* In a new session, ask *"How should I name this branch?"* and watch it call `recall`.
@@ -102,7 +108,11 @@ The scheduler calls `engram sleep run --if-due` every 15 minutes; it only works 
 
 | Command | What it does |
 | --- | --- |
-| `engram serve [--client NAME]` | Run the MCP server over stdio |
+| `engram init [--yes]` | Set up models, agents, sleep hours, scheduler and starting knowledge |
+| `engram serve [--client NAME]` | Serve over stdio: MCP, or native ECP when the client's first message is an ECP `initialize` |
+| `engram serve --http 127.0.0.1:7079` | Serve native ECP at `/ecp` and MCP at `/mcp` over HTTP, with bearer tokens |
+| `engram token create CLIENT [--service]` / `list` / `revoke` | Issue and revoke HTTP tokens; service tokens write as `system` |
+| `engram conformance --url URL --token T` / `-- COMMAND` | Check any ECP server against the spec |
 | `engram pair NAME --read NS --write NS [--expires 30d]` | Approve a client for namespaces (comma-separated) |
 | `engram clients` | List paired clients and their grants |
 | `engram revoke NAME` | Remove all of a client's grants |
@@ -112,7 +122,8 @@ The scheduler calls `engram sleep run --if-due` every 15 minutes; it only works 
 | `engram import git PATH [--ns NS] [--since "6 months ago"]` | Import a repository's commits, file coupling and naming conventions |
 | `engram import jira FILE [--ns NS]` | Import a saved Jira search export (JSON) |
 | `engram import json FILE [--ns NS]` | Import generic records |
-| `engram pack list` / `install NAME` / `remove NAME` | Manage pathway packs |
+| `engram pack list` / `search` / `install NAME[@V]\|FILE` / `update` / `remove` | Manage pathway packs from built-ins, registries and files |
+| `engram pack export NS --name N [--sign]` / `keygen` / `sign` / `trust` / `registry` / `publish` | Share packs: export, sign, trust publishers, host registries |
 | `engram sleep hours 01:00-07:00 --tz America/New_York` | Set your sleep hours |
 | `engram sleep run [--light] [--if-due]` | Run a consolidation cycle now, or only when it is due |
 | `engram sleep report [--json]` | Show the latest morning report and its undoable changes |
@@ -189,7 +200,14 @@ The database lives at `~/.engram/engram.db`; set `ENGRAM_DB` to use another file
 | Local dashboard: overview, graph explorer, memory search, sleep changes with undo, health and self-test, triggers, sessions, agents, permission agreement | ✅ M10 |
 | Approvals inbox: keep or reject distilled facts, resolve conflicts | ✅ M10 |
 | Static HTML report after each sleep cycle | ✅ M10 |
-| Hosted dashboard, thought-path view, packs view | design |
+| Hosted dashboard, thought-path view | design |
+| Recall at scale: FTS4 and an in-memory vector index; 100k memories at p50 46 ms on 2 cores | ✅ M11 |
+| Native ECP over stdio and HTTP: `initialize` and negotiation, every `engram/*` method, `path`, `consolidate`, pushed `relevant`, `conflict` and `consolidated` notifications | ✅ M11 |
+| HTTP bearer tokens and service identities; MCP over Streamable HTTP | ✅ M11 (OAuth 2.1 is design) |
+| Conformance suite (27 checks) and SDKs for Go, TypeScript and Python | ✅ M11 |
+| `engram init`, release binaries, `install.sh`, Homebrew formula, Docker image and Compose | ✅ M11 |
+| Signed packs, registries (local, public, private), updates that keep learned weights, instance export, packs view | ✅ M11 |
+| Postgres backend for teams | design (its own milestone) |
 
 ---
 
@@ -433,7 +451,7 @@ Every mechanism is a switchable module, phased in and kept only if an ablation s
 
 ## Pathway packs
 
-*The pack format, the built-in Developer pack and install/remove are implemented (M3); the registry, signing and visibility are design (M11).* Downloadable, versioned bundles of pre-wired memory that give Engram a head start in a domain, then adapt to you. Packs ship memory *structure*, not instructions.
+*Implemented: the pack format and Developer pack (M3), and signing, registries (local, public and private), versions, updates and instance export (M11). Source packs and a hosted public registry are design.* Downloadable, versioned bundles of pre-wired memory that give Engram a head start in a domain, then adapt to you. Packs ship memory *structure*, not instructions.
 
 | Kind | Contains | Example |
 | --- | --- | --- |
@@ -484,7 +502,7 @@ See [SECURITY.md](SECURITY.md) for the threat model and reporting.
 
 ## Testing and drift detection
 
-**Software tests:** unit, property-based invariants (weights in range, provenance always present, scopes never leak), golden recall queries, store parity, protocol conformance, security (prompt injection, scope fuzzing) and performance. The M1 suite runs in CI on Linux and macOS.
+**Software tests:** unit, property-based invariants (weights in range, provenance always present, scopes never leak), golden recall queries, store parity, protocol conformance, security (prompt injection, scope fuzzing) and performance. Unit and integration tests run in CI on Linux and macOS, together with the ECP conformance suite, the SDK suites against a live server, a Docker image build, and an opt-in 100k-memory latency test (`ENGRAM_SCALE=1`).
 
 **Neuroscience bounds** catch a system that is bug-free but drifting:
 
@@ -552,9 +570,10 @@ Delivery: a live local dashboard (default), a static HTML report regenerated eac
 
 ## Packaging and footprint
 
-- **Local default:** a native Go binary plus a SQLite file. MCP clients launch servers as subprocesses, so containers would add friction and can't use the GPU on Apple Silicon.
-- **Docker Compose** (M11) for teams, Engram Cloud and self-hosting: engine, Postgres, Redis, ML workers, dashboard.
-- **SDKs** in Go, TypeScript and Python, generated against the ECP JSON Schema.
+- **Local default:** a native Go binary plus a SQLite file. MCP clients launch servers as subprocesses, so containers would add friction and can't use the GPU on Apple Silicon. Install with `install.sh` (checksummed release binaries for Linux, macOS and Windows), the Homebrew formula in `packaging/homebrew/`, or `go install`.
+- **Docker Compose** *(✅ M11 with SQLite)*: `docker compose up -d` runs the engine (`/ecp`, `/mcp`), the trigger listener, the dashboard and the sleep loop on one volume, published on 127.0.0.1, with an optional Ollama profile. Postgres, Redis and ML workers join when those exist.
+- **SDKs** *(✅ M11)* in Go, TypeScript and Python, with no runtime dependencies, typed against the ECP schema. See [sdk/README.md](sdk/README.md).
+- **Releases**: pushing a `v*` tag builds native binaries for five platforms, publishes checksums and pushes `ghcr.io/zakeripouya/engramcontextprotocol`.
 - **License:** Apache-2.0 for the spec, SDKs and engine; Engram Cloud adds hosted sync, team memory and backups.
 
 | Component | Cost |
@@ -571,7 +590,7 @@ Delivery: a live local dashboard (default), a static HTML report regenerated eac
 
 ECP is JSON-RPC 2.0 over stdio or Streamable HTTP, extending MCP. The normative definition is [`spec/schema.ts`](spec/schema.ts); a generated [`spec/schema.json`](spec/schema.json) lets any language validate messages. The full prose specification is [docs/spec/ecp-v0.md](docs/spec/ecp-v0.md).
 
-**Today** the engine speaks the **MCP compatibility profile**: the methods below are exposed as MCP tools named `observe`, `recall`, `get`, `forget`, `feedback`, `attend`, `subscribe`, `unsubscribe`, `checkpoint`, `sessions`, `resume` and `delegate`, plus the resources `engram://attention` (subscribable) and `engram://memory/{id}`, with the same parameters in snake_case (`valid_from`, `as_of`, `session_id`). The native `engram/*` JSON-RPC methods are the protocol definition, which the tools mirror.
+**Today** the engine speaks **native ECP** on stdio (when the first message is an ECP `initialize`) and over HTTP (`engram serve --http`: `POST /ecp`, a server-sent event stream on `GET /ecp`, `DELETE /ecp`, with the session in `Ecp-Session-Id` and a bearer token from `engram token create`). It also speaks the **MCP compatibility profile** on stdio and at `/mcp`: the methods below are exposed as MCP tools named `observe`, `recall`, `get`, `forget`, `feedback`, `attend`, `subscribe`, `unsubscribe`, `checkpoint`, `sessions`, `resume` and `delegate`, plus the resources `engram://attention` (subscribable) and `engram://memory/{id}`, with the same parameters in snake_case (`valid_from`, `as_of`, `session_id`). The native `engram/*` JSON-RPC methods are the protocol definition, which the tools mirror.
 
 ### Envelope
 
@@ -671,11 +690,11 @@ A feature may be used only if the relevant side declared it. Servers MUST suppor
 | `engram/recall` | `recall` | Retrieve related memories | ✅ M1 |
 | `engram/get` | `get` | Fetch memories by id | ✅ M1 |
 | `engram/forget` | `forget` | Delete memories, cascading to derived ones | ✅ M1 |
-| `engram/path` | | Best path between two memories | design |
+| `engram/path` | | Best path between two memories (maximin or most probable) | ✅ M11 |
 | `engram/attend` | `attend` | What matters now for a context | ✅ M8 |
 | `engram/feedback` | `feedback` | Report accepts, overrides and outcomes | ✅ M4 |
 | `engram/subscribe`, `engram/unsubscribe` | `subscribe`, `unsubscribe` + `engram://attention` | Push notifications | ✅ M8 |
-| `engram/consolidate` | | Trigger a sleep cycle | design |
+| `engram/consolidate` | | Run a sleep cycle (needs a write grant on `*`) | ✅ M11 |
 | `engram/session/checkpoint`, `resume`, `list`, `delegate` | `checkpoint`, `resume`, `sessions`, `delegate` | Task state shared between agents | ✅ M7 |
 
 #### `engram/observe`
@@ -776,7 +795,7 @@ A conflict is recorded with `observe` and `contradicts: [ids]` when two current 
 
 `outcome`: `accepted` or `overridden`. `objective` (`succeeded` or `failed`) is weighted above approval: a failed outcome weakens even when approved. A `correction` is stored as a user decision linked by an `overrode` edge. Over the MCP profile the parameter is `memory_ids`.
 
-#### `engram/path` *(design)*
+#### `engram/path`
 
 ```json
 {"jsonrpc": "2.0", "id": 8, "method": "engram/path", "params": {"from": "mem_seed01", "to": "mem_3f9a1c2b7d4e5f60", "rule": "maximin"}}
@@ -806,13 +825,13 @@ Notifications go only to clients that declared the capability, never include mem
 
 **Over MCP (implemented):** the `subscribe` tool takes the same params and returns `{"subscriptionId", "resource": "engram://attention"}`. The client subscribes to that resource with `resources/subscribe`; when an event is salient (`relevance to the context + 0.3 for a shared tag + 0.25 if it failed ≥ threshold`), the server sends `notifications/resources/updated` and reading the resource returns the notifications with their memories, marking them delivered. Events are recorded by whichever process receives them (`engram listen`, `engram job run`), so each serving process polls the store every 2 seconds and rate-limits pushes to one per 30 seconds per connection. Subscriptions end with the connection. Conflict and consolidation notifications are design.
 
-#### `engram/consolidate` *(design)*
+#### `engram/consolidate`
 
 ```json
-{"jsonrpc": "2.0", "id": 11, "method": "engram/consolidate", "params": {"namespace": "team/ink", "light": true}}
+{"jsonrpc": "2.0", "id": 11, "method": "engram/consolidate", "params": {"light": true}}
 ```
 
-`light` runs only decay and dedupe.
+`light` runs only decay and dedupe. The result is the cycle's morning report. A `namespace` is not supported yet; clients need a write grant on `*`, since a cycle changes every namespace.
 
 #### Sessions
 
@@ -916,7 +935,7 @@ Each milestone is roughly one to two weekends and has a done-check.
 10. **M10 · Dashboard** ✅ Local dashboard, approvals inbox and static report.
 
 **Phase 4 · Distribution**
-11. **M11 · Packaging and protocol:** `engram init`, ECP v1, conformance suite, SDKs, Docker Compose, pack registry.
+11. **M11 · Packaging and protocol** ✅ `engram init`, native ECP over stdio and HTTP, conformance suite, SDKs, releases, Docker Compose and the signed pack registry. Freezing ECP v1 waits on the spec's open issues; the Postgres backend is its own milestone.
 12. **M12 · Publish:** LoCoMo and LongMemEval results, decision-prediction and cross-agent evaluations, paper draft.
 
 Every remaining item, with its phase and size, is in the [backlog](docs/backlog.md).

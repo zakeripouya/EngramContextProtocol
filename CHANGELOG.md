@@ -2,9 +2,9 @@
 
 All notable changes are recorded here. The protocol version (ECP) and the engine version are tracked separately.
 
-## [0.11.0] - unreleased
+## [0.11.0] - 2026-11-03
 
-Engine milestone M11: packaging and protocol (in progress).
+Engine milestone M11: packaging and protocol. Not included: freezing ECP v1 (open issues remain) and the Postgres backend (its own milestone).
 
 ### Added
 

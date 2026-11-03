@@ -16,16 +16,17 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 
 ## 1. Protocol and transport (ECP)
 
-- [ ] Native `engram/*` JSON-RPC methods. Today only the MCP compatibility profile (tools and resources) is served. `M11` `L`
-- [ ] Streamable HTTP transport with OAuth tokens; real authentication instead of the stdio `clientInfo` consent gate. `M11` `L`
-- [ ] `engram/path`: maximin (weakest-link) and `most_probable` (−log weight) paths between two memories. `M11` `M`
-- [ ] `engram/consolidate`: trigger a sleep cycle over the protocol (`namespace`, `light`). `M11` `S`
-- [ ] Native notifications: `notifications/engram/relevant`, `notifications/engram/conflict` and `notifications/engram/consolidated`. Over MCP today only `engram://attention` updates exist, and conflict and consolidation events aren't pushed at all. `M11` `M`
-- [ ] Push rate limit per subscription, as the spec says. Today it's per connection. `polish` `S`
-- [ ] Capability negotiation as specified (`capabilities` in `initialize`, `supportedVersions`). `M11` `M`
-- [ ] Conformance test suite that any implementation can run. `M11` `L`
-- [ ] SDKs in Go, TypeScript and Python, generated from `spec/schema.json`. `M11` `L`
-- [ ] ECP v1: freeze the schema and settle the open issues below. `M11` `M`
+- [x] Native `engram/*` JSON-RPC methods over stdio and HTTP (0.11.0). `M11` `L`
+- [x] HTTP transport with real authentication: CLI-issued bearer tokens decide identity (0.11.0). `M11` `L`
+- [ ] OAuth 2.1 authorization server for HTTP clients (tokens are CLI-issued today). `v2` `M`
+- [x] `engram/path`: maximin (weakest-link) and `most_probable` (−log weight) paths between two memories. `M11` `M`
+- [x] `engram/consolidate`: trigger a sleep cycle over the protocol (`namespace`, `light`). `M11` `S`
+- [x] Native notifications: `notifications/engram/relevant`, `notifications/engram/conflict` and `notifications/engram/consolidated`. Over MCP today only `engram://attention` updates exist, and conflict and consolidation events aren't pushed at all. `M11` `M`
+- [x] Push rate limit per subscription, as the spec says. Today it's per connection. `polish` `S`
+- [x] Capability negotiation as specified (`capabilities` in `initialize`, `supportedVersions`). `M11` `M`
+- [x] Conformance test suite that any implementation can run. `M11` `L`
+- [x] SDKs in Go, TypeScript and Python, generated from `spec/schema.json`. `M11` `L`
+- [ ] ECP v1: freeze the schema and settle the open issues below. A governance decision for the maintainer; the reference server and conformance suite are ready for it. `M11` `M`
 - [ ] Open issues from the spec:
   - [ ] Name check: "ECP" and "Engram" against other AI-protocol projects and trademarks (Roku's External Control Protocol uses the acronym).
   - [ ] Expose sparse codes and edge weights on the wire, or keep them server-internal?
@@ -88,7 +89,7 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 - [ ] Mutation tests for contradictions (only duplicates, secrets and runaway hubs today). `polish` `S`
 - [ ] A small adversarial agent probing for prompt injection and scope leaks. `v2` `L`
 - [ ] Bounds not measured yet: code sparsity (needs §2), forgetting-curve power-law fit, interference as the graph grows, result diversity, activation convergence, confidence calibration, trait stability. `v2` `M`
-- [ ] Software tests from the design: property-based invariants (weights in range, provenance always present, scopes never leak), store parity once Postgres exists, protocol conformance (§1), security fuzzing of scopes, and performance tests (recall under 100 ms at 100k memories). `M11` `L`
+- [ ] Software tests from the design: property-based invariants (weights in range, provenance always present, scopes never leak), store parity once Postgres exists, and security fuzzing of scopes. Protocol conformance and the 100k-memory performance test exist (0.11.0). `M11` `L`
 
 ## 7. Triggers, push and awareness
 
@@ -107,11 +108,11 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 
 ## 9. Packs and procedures
 
-- [ ] Pack registry: public, private (org) and local visibility; versioning and updates. `M11` `L`
-- [ ] Pack signing and verification; exports that strip private memories and secrets. `M11` `M`
+- [x] Pack registry: public, private (org) and local visibility; versioning and updates. `M11` `L`
+- [x] Pack signing and verification; exports that strip private memories and secrets. `M11` `M`
 - [ ] Source packs: rules that map a system into the graph (for example a GitHub repo's modules, import graph and reviews). `v2` `L`
-- [ ] Instance packs: export your own learned subgraph to share with a teammate. `v2` `M`
-- [ ] Usage reweighting stats per pack, for the dashboard. `polish` `S`
+- [x] Instance packs: export your own learned subgraph to share with a teammate. `v2` `M`
+- [x] Usage reweighting stats per pack, for the dashboard. `polish` `S`
 - [ ] Executable procedures in a sandbox with declared permissions and first-run approval: a declarative step list of MCP calls first, then WebAssembly, Starlark or Deno-style permissions if general code is needed. `research` `L`
 
 ## 10. Dashboard
@@ -119,7 +120,7 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 - [ ] Thought-path view: why a memory was recalled, its maximin path and weakest link, with weaken or remove actions. Needs `engram/path`. `v2` `M`
 - [ ] Decisions and traits view: approve, edit or reject candidate traits and procedures. `v2` `M`
 - [ ] Inbox additions: live permission requests (once auto-approval exists), trait and procedure approvals, from every agent and device. `v2` `M`
-- [ ] Packs view: install, update, uninstall, export, and how use reweighted each pack. `M11` `M`
+- [x] Packs view: install, update, uninstall, export, and how use reweighted each pack. `M11` `M`
 - [ ] Consent management for teammates (§12). `v2` `M`
 - [ ] Cost metrics (LLM spend per cycle) on the overview. `polish` `S`
 - [ ] Rotatable 3D graph; the 2D force layout is O(n²) and capped at about 220 nodes. `polish` `M`
@@ -128,7 +129,7 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 
 ## 11. Storage, caching, sync and observability
 
-- [ ] `Store` interface with a shared test suite, then a Postgres backend with `pgvector` and row-level security. `M11` `L`
+- [ ] `Store` interface with a shared test suite, then a Postgres backend with `pgvector` and row-level security. Deferred from M11 to its own milestone: about 150 SQL call sites use SQLite-specific features (FTS4, rowid-based index refresh, `VACUUM INTO` snapshots, `INSERT OR IGNORE`). `teams` `L`
 - [x] Vector index: exact in-memory index plus an FTS4 full-text index for candidates (0.11.0); recall at 100k memories measured at p50 46 ms on 2 cores. `M11` `M`
 - [ ] Caching ("myelination"): embedding cache, hot subgraph, precomputed paths between busy hubs, recall and attend results, and LLM outputs, invalidated per graph region; batched Hebbian updates. `v2` `L`
 - [ ] Sync between devices and teammates with CRDTs; weight changes as additive deltas. `research` `L`
@@ -146,7 +147,7 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 - [ ] "Octopus legs": Engram as an MCP client to GitHub, Gmail, Slack, Calendar and Linear, turning their changes into episodes. `v2` `L`
 - [ ] Observers: capture agent turns through Claude Code hooks and CLI wrappers; a consented browser extension for assistant web apps. `v2` `L`
 - [ ] Python ML workers reading and writing through the store, with versioned models and rollback, for: HDBSCAN, Leiden, isolation forest, GNN link prediction (GraphSAGE or GAT), learning-to-rank, decision prediction (gradient-boosted trees or logistic regression), calibration, and monthly contrastive fine-tuning of the embedding model. Hand-set rules until a few hundred feedback events exist. `v2` `L`
-- [ ] Headless service identities with their own tokens, writing as `author: "system"` (with §1 HTTP auth). `M11` `M`
+- [x] Headless service identities with their own tokens, writing as `author: "system"` (with §1 HTTP auth). `M11` `M`
 
 ## 14. Permission assist
 
@@ -159,9 +160,9 @@ Everything specified in the [design](design.md), the [ECP spec](spec/ecp-v0.md) 
 
 ## 15. Packaging (M11)
 
-- [ ] `engram init`: one-command setup (database, embeddings, LLM, sleep hours, pairing, hooks). Install under five minutes. `M11` `M`
-- [ ] Release builds and install paths (GitHub releases, Homebrew), with cgo SQLite cross-compiles. `M11` `M`
-- [ ] Docker Compose for teams and self-hosting: engine, Postgres, Redis, ML workers, dashboard. `M11` `M`
+- [x] `engram init`: one-command setup (database, embeddings, LLM, sleep hours, pairing, hooks). Install under five minutes. `M11` `M`
+- [x] Release builds and install paths (GitHub releases, Homebrew), with cgo SQLite cross-compiles. `M11` `M`
+- [x] Docker Compose for self-hosting: engine, trigger listener, dashboard, sleep loop and optional Ollama, on SQLite (0.11.0); Postgres, Redis and ML workers join when they exist. `M11` `M`
 - [ ] Engram Cloud: hosted sync, team memory, backups. `research` `L`
 
 ## 16. Evaluation and publishing (M12)
@@ -194,3 +195,6 @@ Small things to revisit during refinement; none block use.
 - Distillation and verification need a chat model; without one they're skipped, not faked.
 - Git import labels repositories imported before 0.10.0 from `.` as ".".
 - Multiple processes share one SQLite file with a 5 s busy timeout; heavy concurrent writers may still see lock waits.
+- Packs installed before 0.11.0 have no recorded priors, so their reweighting stats stay at zero until reinstalled.
+- `engram/consolidate` cannot target one namespace yet, and needs a write grant on `*`.
+- The release workflow, Homebrew formula, Docker image and `install.sh` are written and statically checked, but have not run yet: their first real run is the first `v*` tag and CI build after `go.sum` is fixed.

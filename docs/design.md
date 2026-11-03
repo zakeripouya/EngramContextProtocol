@@ -8,7 +8,7 @@ Engram is a local-first, vendor-neutral memory and awareness layer that lets eve
 
 Agents connect through the Engram Context Protocol (ECP), a JSON-RPC 2.0 protocol modeled on MCP and compatible with it, so any MCP client can use Engram on day one. ECP adds what MCP lacks for awareness: an observe stream, salience queries, push notifications and feedback.
 
-**Implementation status:** milestones M1 (working server), M2 (embeddings, kNN wiring, Hebbian learning, pathway recall) M3 (bootstrapping and the Developer pack) M4 (feedback, three-factor learning, multi-hop retrieval) M5 (the sleep cycle), M6 (the testing harness), M7 (sessions and handoff), M8 (triggers, push and `attend`), M9 (permission assist in shadow mode) and M10 (dashboard, approvals inbox and static report) are implemented in this repository; everything else in this document is design. The protocol itself is specified in the [ECP v0 Specification](spec/ecp-v0.md).
+**Implementation status:** milestones M1 (working server), M2 (embeddings, kNN wiring, Hebbian learning, pathway recall) M3 (bootstrapping and the Developer pack) M4 (feedback, three-factor learning, multi-hop retrieval) M5 (the sleep cycle), M6 (the testing harness), M7 (sessions and handoff), M8 (triggers, push and `attend`), M9 (permission assist in shadow mode), M10 (dashboard, approvals inbox and static report) and M11 (native ECP, conformance suite, SDKs, packaging and the pack registry) are implemented in this repository; everything else in this document is design. The protocol itself is specified in the [ECP v0 Specification](spec/ecp-v0.md).
 
 ## Problem and motivation
 
@@ -735,7 +735,7 @@ The design has grown well past a weekend project, so the work is phased: each ph
 
 **Phase 4 · Distribution**
 
-11. **M11 · Packaging and protocol.** `engram init`, ECP v1 with the conformance suite and SDKs, the Docker Compose stack, and the pack registry with public and private packs.
+11. **M11 · Packaging and protocol.** ✅ Implemented, except freezing v1 and Postgres. `engram init`, ECP v1 with the conformance suite and SDKs, the Docker Compose stack, and the pack registry with public and private packs.
 12. **M12 · Publish.** Open-source release; LoCoMo and LongMemEval results against HeLa-Mem and Mem0; the decision-prediction and cross-agent evaluations; a paper draft.
 
 **Research track** (off by default, picked up when the core is stable): sparse block codes and thought paths, GNN link prediction, Monte Carlo search while dreaming, executable procedures in a sandbox, neuromodulation and v2 neuroscience mechanisms, Soar chunking, and Engram Cloud with CRDT sync for cross-device use and team consent.
